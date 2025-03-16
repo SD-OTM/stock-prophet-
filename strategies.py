@@ -5,8 +5,18 @@ Defines different trading strategies with customizable parameters
 
 import logging
 import numpy as np
+import pandas as pd
 
 logger = logging.getLogger(__name__)
+
+def safe_numeric_value(value):
+    """Safely extract numeric value from pandas Series or scalar"""
+    if isinstance(value, pd.Series):
+        if len(value) > 0:
+            return float(value.iloc[0])
+        return 0.0
+    return float(value)
+
 
 class Strategy:
     """Base class for all trading strategies"""
@@ -63,7 +73,7 @@ class RSIStrategy(Strategy):
                 # Check if the forecasted prices show an uptrend (last forecast > current price)
                 current_price = latest['Close']
                 last_forecast = forecasts[-1]
-                price_trend_up = last_forecast > current_price
+                price_trend_up = safe_numeric_value(last_forecast) > safe_numeric_value(current_price)
                 
                 if price_trend_up:
                     logger.info(f"Detected upward price trend for {ticker}. Applying standard take profit/stop loss.")
@@ -84,22 +94,22 @@ class RSIStrategy(Strategy):
                 take_profit_price = buying_price * 1.01  # 1% take profit
                 stop_loss_price = buying_price * 0.95   # 5% stop loss
             
-            if (latest['Close'] >= take_profit_price):
+            if (safe_numeric_value(latest['Close']) >= take_profit_price):
                 profit_pct = ((latest['Close'] / buying_price) - 1) * 100
                 signals.append(f"📉 Sell {ticker} at {latest['Close']:.2f} (Take profit triggered at {profit_pct:.2f}%).")
                 del user_data[user_id][ticker]  # Close the position
-            elif (latest['Close'] <= stop_loss_price):
+            elif (safe_numeric_value(latest['Close']) <= stop_loss_price):
                 loss_pct = (1 - (latest['Close'] / buying_price)) * 100
                 signals.append(f"📉 Sell {ticker} at {latest['Close']:.2f} (Stop loss triggered at {loss_pct:.2f}%).")
                 del user_data[user_id][ticker]  # Close the position
             
             # Additional sell signals based on technical indicators
-            elif latest['RSI'] > self.parameters['overbought_threshold']:  # Overbought
+            elif safe_numeric_value(latest['RSI']) > safe_numeric_value(self.parameters['overbought_threshold']):  # Overbought
                 signals.append(f"📉 Consider selling {ticker} at {latest['Close']:.2f} (RSI {latest['RSI']:.2f} indicates overbought conditions).")
         
         else:
             # Original buy signal, but only generate if price is forecasted to rise
-            rsi_oversold = latest['RSI'] < self.parameters['oversold_threshold']
+            rsi_oversold = safe_numeric_value(latest['RSI']) < safe_numeric_value(self.parameters['oversold_threshold'])
             
             if rsi_oversold and (not self.parameters['use_prediction'] or price_trend_up):
                 signals.append(f"🚀 Buy {ticker} at {latest['Close']:.2f} (RSI {latest['RSI']:.2f} indicates oversold conditions).")
@@ -150,7 +160,7 @@ class BollingerBandsStrategy(Strategy):
                 # Check if the forecasted prices show an uptrend (last forecast > current price)
                 current_price = latest['Close']
                 last_forecast = forecasts[-1]
-                price_trend_up = last_forecast > current_price
+                price_trend_up = safe_numeric_value(last_forecast) > safe_numeric_value(current_price)
                 
                 if price_trend_up:
                     logger.info(f"Detected upward price trend for {ticker}. Applying standard take profit/stop loss.")
@@ -175,22 +185,22 @@ class BollingerBandsStrategy(Strategy):
                 take_profit_price = buying_price * 1.01  # 1% take profit
                 stop_loss_price = buying_price * 0.95   # 5% stop loss
             
-            if (latest['Close'] >= take_profit_price):
+            if (safe_numeric_value(latest['Close']) >= take_profit_price):
                 profit_pct = ((latest['Close'] / buying_price) - 1) * 100
                 signals.append(f"📉 Sell {ticker} at {latest['Close']:.2f} (Take profit triggered at {profit_pct:.2f}%).")
                 del user_data[user_id][ticker]  # Close the position
-            elif (latest['Close'] <= stop_loss_price):
+            elif (safe_numeric_value(latest['Close']) <= stop_loss_price):
                 loss_pct = (1 - (latest['Close'] / buying_price)) * 100
                 signals.append(f"📉 Sell {ticker} at {latest['Close']:.2f} (Stop loss triggered at {loss_pct:.2f}%).")
                 del user_data[user_id][ticker]  # Close the position
             
             # Additional sell signals - close when price hits upper band
-            elif latest['Close'] >= latest['BB_upper']:
+            elif safe_numeric_value(latest['Close']) >= safe_numeric_value(latest['BB_upper']):
                 signals.append(f"📉 Consider selling {ticker} at {latest['Close']:.2f} (Price hit upper Bollinger Band).")
         
         else:
             # Buy signal when price is near or below lower band
-            price_near_lower_band = latest['Close'] <= latest['BB_lower'] * 1.01
+            price_near_lower_band = safe_numeric_value(latest['Close']) <= safe_numeric_value(latest['BB_lower']) * 1.01
             
             # Check if bands are wide enough to indicate volatility
             band_gap = (latest['BB_upper'] - latest['BB_lower']) / latest['BB_middle']
@@ -246,7 +256,7 @@ class MACDStrategy(Strategy):
                 # Check if the forecasted prices show an uptrend (last forecast > current price)
                 current_price = latest['Close']
                 last_forecast = forecasts[-1]
-                price_trend_up = last_forecast > current_price
+                price_trend_up = safe_numeric_value(last_forecast) > safe_numeric_value(current_price)
                 
                 if price_trend_up:
                     logger.info(f"Detected upward price trend for {ticker}. Applying standard take profit/stop loss.")
@@ -271,22 +281,22 @@ class MACDStrategy(Strategy):
                 take_profit_price = buying_price * 1.01  # 1% take profit
                 stop_loss_price = buying_price * 0.95   # 5% stop loss
             
-            if (latest['Close'] >= take_profit_price):
+            if (safe_numeric_value(latest['Close']) >= take_profit_price):
                 profit_pct = ((latest['Close'] / buying_price) - 1) * 100
                 signals.append(f"📉 Sell {ticker} at {latest['Close']:.2f} (Take profit triggered at {profit_pct:.2f}%).")
                 del user_data[user_id][ticker]  # Close the position
-            elif (latest['Close'] <= stop_loss_price):
+            elif (safe_numeric_value(latest['Close']) <= stop_loss_price):
                 loss_pct = (1 - (latest['Close'] / buying_price)) * 100
                 signals.append(f"📉 Sell {ticker} at {latest['Close']:.2f} (Stop loss triggered at {loss_pct:.2f}%).")
                 del user_data[user_id][ticker]  # Close the position
             
             # Additional sell signals based on MACD crossover (bearish)
-            elif (latest['MACD'] < latest['MACD_Signal']) and abs(latest['MACD'] - latest['MACD_Signal']) > self.parameters['signal_threshold']:
+            elif (safe_numeric_value(latest['MACD']) < safe_numeric_value(latest['MACD_Signal'])) and abs(safe_numeric_value(latest['MACD']) - safe_numeric_value(latest['MACD_Signal'])) > self.parameters['signal_threshold']:
                 signals.append(f"📉 Consider selling {ticker} at {latest['Close']:.2f} (MACD bearish crossover).")
         
         else:
             # Buy signal on MACD crossover (bullish)
-            macd_bullish = (latest['MACD'] > latest['MACD_Signal']) and abs(latest['MACD'] - latest['MACD_Signal']) > self.parameters['signal_threshold']
+            macd_bullish = (safe_numeric_value(latest['MACD']) > safe_numeric_value(latest['MACD_Signal'])) and abs(safe_numeric_value(latest['MACD']) - safe_numeric_value(latest['MACD_Signal'])) > self.parameters['signal_threshold']
             
             # Only generate buy signal if not using prediction or price trend is up
             if macd_bullish and (not self.parameters['use_prediction'] or price_trend_up):
@@ -340,7 +350,7 @@ class CombinedStrategy(Strategy):
                 # Check if the forecasted prices show an uptrend (last forecast > current price)
                 current_price = latest['Close']
                 last_forecast = forecasts[-1]
-                price_trend_up = last_forecast > current_price
+                price_trend_up = safe_numeric_value(last_forecast) > safe_numeric_value(current_price)
                 
                 if price_trend_up:
                     logger.info(f"Detected upward price trend for {ticker}. Applying standard take profit/stop loss.")
@@ -367,11 +377,11 @@ class CombinedStrategy(Strategy):
                 take_profit_price = buying_price * 1.01  # 1% take profit
                 stop_loss_price = buying_price * 0.95   # 5% stop loss
             
-            if (latest['Close'] >= take_profit_price):
+            if (safe_numeric_value(latest['Close']) >= take_profit_price):
                 profit_pct = ((latest['Close'] / buying_price) - 1) * 100
                 signals.append(f"📉 Sell {ticker} at {latest['Close']:.2f} (Take profit triggered at {profit_pct:.2f}%).")
                 del user_data[user_id][ticker]  # Close the position
-            elif (latest['Close'] <= stop_loss_price):
+            elif (safe_numeric_value(latest['Close']) <= stop_loss_price):
                 loss_pct = (1 - (latest['Close'] / buying_price)) * 100
                 signals.append(f"📉 Sell {ticker} at {latest['Close']:.2f} (Stop loss triggered at {loss_pct:.2f}%).")
                 del user_data[user_id][ticker]  # Close the position
