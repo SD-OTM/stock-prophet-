@@ -16,11 +16,11 @@ import math
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+# Check if running in CI environment
+IS_CI_ENV = os.environ.get('CI') == 'true'
+
 # Alpha Vantage API for News Sentiment
 ALPHA_VANTAGE_API_KEY = os.environ.get("ALPHA_VANTAGE_API_KEY", "")
-
-# Check if running in CI environment
-CI_ENV = os.environ.get('CI') == 'true'
 
 # Sentiment score ranges
 SENTIMENT_RANGES = {
@@ -47,7 +47,7 @@ class SentimentAnalysis:
             Dictionary with sentiment data including scores and news items
         """
         # In CI environment, always return neutral sentiment to avoid API issues
-        if CI_ENV:
+        if IS_CI_ENV:
             logger.info("Running in CI environment, skipping actual API call")
             return {"sentiment_score": 0, "sentiment_label": "Neutral", "news_count": 0, "news_items": []}
             
