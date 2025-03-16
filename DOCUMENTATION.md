@@ -242,6 +242,41 @@ The Combined Strategy requires multiple indicators to confirm a signal, providin
 - For uptrends: Standard thresholds (3% profit, 4% loss)
 - For downtrends: Conservative thresholds (1% profit, 5% loss)
 
+#### Gold Strategy
+
+```python
+class GoldStrategy(Strategy):
+    """Specialized strategy for gold and precious metals"""
+    def __init__(self, parameters=None):
+        """Initialize with two parameter sets:
+        
+        Commodity Gold Parameters:
+        - rsi_oversold: 35 (more aggressive than ETFs)
+        - rsi_overbought: 65
+        - bb_std_dev: 2.5 (wider bands for commodities)
+        - take_profit: 2.0% (higher targets for commodities)
+        - stop_loss: 2.5%
+        - min_indicators: 2
+        
+        ETF Gold Parameters:
+        - rsi_oversold: 40 (more conservative)
+        - rsi_overbought: 60
+        - bb_std_dev: 2.0
+        - take_profit: 1.5% (conservative targets for ETFs)
+        - stop_loss: 2.0%
+        - min_indicators: 2
+        """
+        
+    def generate_signals(self, data, user_id, ticker, user_data=None):
+        """Generate buy/sell signals for gold assets with asset-specific parameters"""
+```
+
+The Gold Strategy is specialized for trading gold and precious metals with different parameter sets for commodities vs ETFs:
+- Automatically detects asset type (gold_commodity, gold_etf, gold_miner)
+- Uses more aggressive parameters for commodities due to higher volatility
+- Uses more conservative parameters for ETFs which tend to be less volatile
+- Provides clear differentiation in trading signals between commodities and ETFs
+
 ### Strategy Utility Functions
 
 ```python

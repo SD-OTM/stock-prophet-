@@ -441,12 +441,211 @@ class CombinedStrategy(Strategy):
         return signals
 
 
+class GoldStrategy(Strategy):
+    """Specialized strategy for gold and precious metals"""
+    def __init__(self, parameters=None):
+        # Define separate default parameters for commodity gold vs ETF gold
+        commodity_params = {
+            'rsi_oversold': 35,  # Commodities can be more volatile than ETFs
+            'rsi_overbought': 65,
+            'bb_std_dev': 2.5,   # Wider bands for commodities
+            'take_profit': 2.0,  # Higher targets for commodities
+            'stop_loss': 2.5,    # Higher risk for commodities
+            'min_indicators': 2,  # Minimum number of indicators confirming for a signal
+            'use_prediction': True
+        }
+        
+        etf_params = {
+            'rsi_oversold': 40,  # Gold ETFs tend to be less volatile
+            'rsi_overbought': 60,
+            'bb_std_dev': 2.0,   # Gold ETFs often respond well to Bollinger Bands
+            'take_profit': 1.5,  # More conservative targets for ETFs
+            'stop_loss': 2.0,    # Lower risk for ETFs
+            'min_indicators': 2,
+            'use_prediction': True
+        }
+        
+        # Start with ETF parameters as default
+        default_params = etf_params.copy()
+        
+        # Override defaults with provided parameters
+        if parameters:
+            default_params.update(parameters)
+        
+        # Store both parameter sets for later use
+        self.commodity_params = commodity_params
+        self.etf_params = etf_params
+            
+        super().__init__(
+            name="Gold Strategy",
+            description="Specialized strategy for gold and precious metals with optimized parameters for both commodities and ETFs",
+            parameters=default_params
+        )
+    
+    def generate_signals(self, data, user_id, ticker, user_data=None):
+        """Generate buy/sell signals for gold assets"""
+        if user_data is None:
+            user_data = {}
+            
+        latest = data.iloc[-1]
+        signals = []
+        
+        # Determine if this is a gold commodity or ETF and use the right parameters
+        is_commodity = False
+        if 'asset_type' in data.attrs:
+            if data.attrs['asset_type'] == 'gold_commodity':
+                # Use commodity-specific parameters
+                is_commodity = True
+                active_params = self.commodity_params.copy()
+                logger.info(f"Using gold commodity parameters for {ticker}")
+            elif data.attrs['asset_type'] == 'gold_etf':
+                # Use ETF-specific parameters
+                active_params = self.etf_params.copy()
+                logger.info(f"Using gold ETF parameters for {ticker}")
+            else:
+                # Default to current parameters
+                active_params = self.parameters
+        else:
+            # Default to current parameters if asset_type not specified
+            active_params = self.parameters
+        
+        # Check for forecast values
+        price_trend_up = True
+        if active_params['use_prediction'] and 'forecast_values' in data.attrs:
+            forecasts = data.attrs['forecast_values']
+            if forecasts:
+                current_price = latest['Close']
+                last_forecast = forecasts[-1]
+                price_trend_up = last_forecast > current_price
+                
+                if price_trend_up:
+                    logger.info(f"Detected upward price trend for {ticker}. Applying standard take profit/stop loss.")
+                else:
+                    logger.info(f"No upward price trend detected for {ticker}. Adjusting to conservative take profit/stop loss.")
+        
+        # Check for available indicators
+        has_rsi = 'RSI' in data.columns
+        has_bb = all(col in data.columns for col in ['BB_upper', 'BB_middle', 'BB_lower'])
+        has_ema = all(col in data.columns for col in ['EMA_9', 'EMA_21'])
+        
+        # Check if the user has an open position for this ticker
+        if user_id in user_data and ticker in user_data[user_id]:
+            buying_price = user_data[user_id][ticker]
+            
+            # Sell Signal (Take Profit or Stop Loss)
+            take_profit_price = buying_price * (1 + active_params['take_profit']/100)
+            stop_loss_price = buying_price * (1 - active_params['stop_loss']/100)
+            
+            if (latest['Close'] >= take_profit_price):
+                profit_pct = ((latest['Close'] / buying_price) - 1) * 100
+                signals.append(f"📉 Sell {ticker} at {latest['Close']:.2f} (Take profit triggered at {profit_pct:.2f}%).")
+                
+                # Add metadata for notifications
+                signal_data = {
+                    'signal_type': 'SELL',
+                    'reason': 'take_profit',
+                    'price': float(latest['Close']),
+                    'profit_percent': float(profit_pct),
+                    'ticker': ticker
+                }
+                
+                del user_data[user_id][ticker]  # Close the position
+                return True, signal_data
+                
+            elif (latest['Close'] <= stop_loss_price):
+                loss_pct = (1 - (latest['Close'] / buying_price)) * 100
+                signals.append(f"📉 Sell {ticker} at {latest['Close']:.2f} (Stop loss triggered at {loss_pct:.2f}%).")
+                
+                # Add metadata for notifications
+                signal_data = {
+                    'signal_type': 'SELL',
+                    'reason': 'stop_loss',
+                    'price': float(latest['Close']),
+                    'loss_percent': float(loss_pct),
+                    'ticker': ticker
+                }
+                
+                del user_data[user_id][ticker]  # Close the position
+                return True, signal_data
+            
+            # Count bearish indicators
+            bearish_indicators = 0
+            
+            # RSI Overbought
+            if has_rsi and latest['RSI'] is not None and latest['RSI'].item() > active_params['rsi_overbought']:
+                bearish_indicators += 1
+            
+            # Price at/above upper Bollinger Band
+            if has_bb and latest['Close'] is not None and latest['BB_upper'] is not None and latest['Close'].item() >= latest['BB_upper'].item():
+                bearish_indicators += 1
+            
+            # If enough bearish indicators, suggest selling
+            if bearish_indicators >= active_params['min_indicators']:
+                signals.append(f"📉 Consider selling {ticker} at {latest['Close']:.2f} ({bearish_indicators} bearish indicators detected).")
+                
+                # Add metadata for notifications
+                signal_data = {
+                    'signal_type': 'SELL',
+                    'reason': 'bearish_indicators',
+                    'price': float(latest['Close']),
+                    'indicators': bearish_indicators,
+                    'ticker': ticker
+                }
+                
+                return True, signal_data
+        
+        else:
+            # Count bullish indicators
+            bullish_indicators = 0
+            
+            # RSI Oversold
+            if has_rsi and latest['RSI'] is not None and latest['RSI'].item() < active_params['rsi_oversold']:
+                bullish_indicators += 1
+            
+            # Price at/below lower Bollinger Band
+            if has_bb and latest['Close'] is not None and latest['BB_lower'] is not None and latest['Close'].item() <= latest['BB_lower'].item():
+                bullish_indicators += 1
+            
+            # Short-term EMA crosses above long-term
+            if has_ema and latest['EMA_9'] is not None and latest['EMA_21'] is not None and latest['EMA_9'].item() > latest['EMA_21'].item():
+                bullish_indicators += 1
+            
+            # If enough bullish indicators, suggest buying
+            if bullish_indicators >= active_params['min_indicators'] and (not active_params['use_prediction'] or price_trend_up):
+                # Add commodity/ETF specific message
+                asset_type_msg = "gold commodity" if is_commodity else "gold ETF"
+                signals.append(f"🚀 Buy {ticker} at {latest['Close']:.2f} ({bullish_indicators} bullish indicators detected for {asset_type_msg}).")
+                
+                # Store the buying price
+                if user_id not in user_data:
+                    user_data[user_id] = {}
+                user_data[user_id][ticker] = latest['Close']
+                
+                # Add metadata for notifications
+                signal_data = {
+                    'signal_type': 'BUY',
+                    'reason': 'bullish_indicators',
+                    'price': float(latest['Close']),
+                    'indicators': bullish_indicators,
+                    'ticker': ticker,
+                    'is_commodity': is_commodity
+                }
+                
+                return True, signal_data
+                
+            elif bullish_indicators >= active_params['min_indicators'] and active_params['use_prediction'] and not price_trend_up:
+                signals.append(f"⚠️ Found {bullish_indicators} bullish indicators for {ticker}, but price is forecasted to decrease. Consider waiting.")
+        
+        # If no signals were generated
+        return False, {}
+
 # Dictionary of available strategies
 AVAILABLE_STRATEGIES = {
     'rsi': RSIStrategy(),
     'bollinger': BollingerBandsStrategy(),
     'macd': MACDStrategy(),
-    'combined': CombinedStrategy()
+    'combined': CombinedStrategy(),
+    'gold': GoldStrategy()
 }
 
 

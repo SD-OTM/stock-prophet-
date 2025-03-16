@@ -208,6 +208,27 @@ Stock Prophet offers multiple trading strategies to generate signals.
 - **Bollinger Bands Strategy**: Buy at lower band, sell at upper band
 - **MACD Strategy**: Buy on MACD crossover, sell on crossunder
 - **Combined Strategy**: Requires confirmation from multiple indicators
+- **Gold Strategy**: Specialized for gold commodities and ETFs with optimized parameters
+
+### Specialized Gold Trading
+
+Stock Prophet includes a dedicated strategy for gold and precious metals trading:
+
+- **Gold Commodity Trading**: Optimized for gold commodities (XAU, GC=F, XAUUSD=X) with more aggressive parameters
+- **Gold ETF Trading**: Configured for gold ETFs (GLD, IAU, SGOL, etc.) with more conservative parameters
+- **Automatic Detection**: The system automatically identifies whether you're analyzing a gold commodity or ETF
+
+When you analyze gold-related assets, the Gold Strategy is automatically applied with the appropriate parameter set:
+
+```
+/ticker GLD
+/ticker GC=F
+```
+
+The system will:
+1. Identify the asset type (commodity or ETF)
+2. Apply the appropriate strategy parameters
+3. Generate optimized trading signals
 
 ### Viewing Strategies
 
@@ -222,6 +243,7 @@ Available Strategies:
 2. bollinger - Buy at lower band, sell at upper band
 3. macd - Buy on MACD line crossing above signal, sell when below
 4. combined - Multiple indicator confirmation (default)
+5. gold - Specialized strategy for gold and precious metals trading
 
 Current strategy: combined
 Use /strategy NAME to change your strategy
@@ -270,6 +292,8 @@ Each signal includes recommended take profit and stop loss levels.
 The system uses adaptive profit/loss thresholds:
 - **Standard** (uptrends): 3% take profit, 4% stop loss
 - **Conservative** (downtrends): 1% take profit, 5% stop loss
+- **Gold Commodity**: 2.0% take profit, 2.5% stop loss (optimized for higher volatility)
+- **Gold ETF**: 1.5% take profit, 2.0% stop loss (optimized for lower volatility)
 
 ## Receiving Notifications
 

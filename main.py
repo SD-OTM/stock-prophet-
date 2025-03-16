@@ -161,6 +161,15 @@ def get_stock_data(ticker, period="1d", interval="1h", timeframe=None):
             period = TIMEFRAMES[timeframe]["period"]
             interval = TIMEFRAMES[timeframe]["interval"]
         
+        # Special handling for gold assets - use the same lists as in analyze_ticker function
+        gold_commodities = ["XAU", "GC=F", "XAUUSD=X", "GC", "MGC=F"]  # Gold commodities
+        gold_etfs = ["GLD", "IAU", "SGOL", "PHYS", "BAR"]  # Gold ETFs
+        gold_miners = ["GOLD", "NEM", "AEM", "FNV", "WPM"]  # Gold mining companies
+        
+        is_gold_commodity = ticker.upper() in gold_commodities
+        is_gold_etf = ticker.upper() in gold_etfs
+        is_gold_miner = ticker.upper() in gold_miners
+        
         logger.info(f"Fetching data for {ticker} with period={period}, interval={interval}")
         stock = yf.Ticker(ticker)
         data = stock.history(period=period, interval=interval)
@@ -178,6 +187,17 @@ def get_stock_data(ticker, period="1d", interval="1h", timeframe=None):
             if len(data) < 3:
                 logger.error(f"Still insufficient data points for {ticker} after retry")
                 return None
+        
+        # Tag with the appropriate asset type
+        if is_gold_commodity:
+            data.attrs['asset_type'] = 'gold_commodity'
+            logger.info(f"Identified {ticker} as a gold commodity")
+        elif is_gold_etf:
+            data.attrs['asset_type'] = 'gold_etf'
+            logger.info(f"Identified {ticker} as a gold ETF")
+        elif is_gold_miner:
+            data.attrs['asset_type'] = 'gold_miner'
+            logger.info(f"Identified {ticker} as a gold mining stock")
         
         logger.info(f"Successfully fetched {len(data)} data points for {ticker}")
         return data
@@ -513,15 +533,57 @@ def save_user_strategies():
 
 # Function to generate entry/exit signals using selected strategy
 def generate_signals(data, user_id, ticker):
-    # Get the user's preferred strategy
-    strategy_name = user_strategies[user_id]
-    strategy = get_strategy(strategy_name)
+    # Check if this is a gold-related asset
+    gold_commodities = ["XAU", "GC=F", "SI=F", "GC", "SI", "HG=F", "HG", "MGC=F"]  # Gold/Silver/Copper commodities
+    gold_etfs = ["GLD", "IAU", "GOLD", "SGOL", "PHYS", "BAR"]  # Gold ETFs
     
-    # Log the strategy being used
-    logger.info(f"Using {strategy.name} for user {user_id} on ticker {ticker}")
+    is_gold_commodity = ticker.upper() in gold_commodities
+    is_gold_etf = ticker.upper() in gold_etfs
+    is_gold_asset = is_gold_commodity or is_gold_etf
+    
+    # Choose strategy based on asset type
+    if is_gold_asset:
+        strategy_name = "gold"
+        strategy = get_strategy("gold")
+        
+        # Mark the data with detailed asset type for the strategy to use
+        if is_gold_commodity:
+            data.attrs['asset_type'] = 'gold_commodity'
+            logger.info(f"Using Gold Strategy for {ticker} as it's a gold commodity")
+        else:
+            data.attrs['asset_type'] = 'gold_etf'
+            logger.info(f"Using Gold Strategy for {ticker} as it's a gold-related ETF")
+    else:
+        # Get the user's preferred strategy for non-gold assets
+        strategy_name = user_strategies[user_id]
+        strategy = get_strategy(strategy_name)
+        logger.info(f"Using {strategy.name} for user {user_id} on ticker {ticker}")
     
     # Generate signals using the selected strategy
-    signals = strategy.generate_signals(data, user_id, ticker, user_data)
+    # Handle both old and new interface
+    strategy_result = strategy.generate_signals(data, user_id, ticker, user_data)
+    
+    # Check if we got a tuple return (new interface) or list (old interface)
+    if isinstance(strategy_result, tuple) and len(strategy_result) == 2:
+        # New interface with (has_signals, signal_data)
+        has_signals, signal_data = strategy_result
+        
+        # Convert signal data to readable signals
+        signals = []
+        if has_signals and signal_data.get('signal_type'):
+            if signal_data.get('signal_type') == 'BUY':
+                signals.append(f"🚀 Buy {ticker} at ${signal_data.get('price', data['Close'].iloc[-1]):.2f}")
+                if 'indicators' in signal_data and is_gold_asset:
+                    signals.append(f"📊 Gold-specific indicators detected: {signal_data['indicators']} bullish signals")
+            elif signal_data.get('signal_type') == 'SELL':
+                signals.append(f"📉 Sell {ticker} at ${signal_data.get('price', data['Close'].iloc[-1]):.2f}")
+                if signal_data.get('reason') == 'take_profit' and 'profit_percent' in signal_data:
+                    signals.append(f"💰 Take profit triggered at {signal_data['profit_percent']:.2f}%")
+                elif signal_data.get('reason') == 'stop_loss' and 'loss_percent' in signal_data:
+                    signals.append(f"🛑 Stop loss triggered at {signal_data['loss_percent']:.2f}%")
+    else:
+        # Old interface with just signals list
+        signals = strategy_result
     
     # Return the signals
     return signals
@@ -583,10 +645,59 @@ def analyze_ticker(ticker, user_id="test_user", timeframe=None):
             # This makes them accessible to strategy functions
             data.attrs['forecast_values'] = forecast_values
             
-            # Get the user's preferred strategy
-            strategy_name = get_user_strategy(user_id)
-            strategy = get_strategy(strategy_name)
-            signals = generate_signals(data, user_id, ticker)
+            # Check if this is a gold-related asset
+            gold_commodities = ["XAU", "GC=F", "XAUUSD=X", "GC", "MGC=F"]  # Gold commodities
+            gold_etfs = ["GLD", "IAU", "SGOL", "PHYS", "BAR"]  # Gold ETFs
+            gold_miners = ["GOLD", "NEM", "AEM", "FNV", "WPM"]  # Gold mining companies
+            
+            is_gold_commodity = ticker.upper() in gold_commodities
+            is_gold_etf = ticker.upper() in gold_etfs
+            is_gold_miner = ticker.upper() in gold_miners
+            is_gold_asset = is_gold_commodity or is_gold_etf  # Only use gold strategy for commodities and ETFs
+            
+            # Get the appropriate strategy (gold strategy for gold assets, user preference otherwise)
+            if is_gold_asset:
+                strategy_name = "gold"
+                strategy = get_strategy("gold")
+                
+                # Mark the data with detailed asset type for the strategy to use
+                if is_gold_commodity:
+                    data.attrs['asset_type'] = 'gold_commodity'
+                    logger.info(f"Using Gold Strategy for {ticker} as it's a gold commodity")
+                else:
+                    data.attrs['asset_type'] = 'gold_etf'
+                    logger.info(f"Using Gold Strategy for {ticker} as it's a gold-related ETF")
+            else:
+                strategy_name = get_user_strategy(user_id)
+                strategy = get_strategy(strategy_name)
+            
+            logger.info(f"Using {strategy.name} for user {user_id} on ticker {ticker}")
+            
+            # Generate signals with the selected strategy
+            # Handle both old and new interface
+            strategy_result = strategy.generate_signals(data, user_id, ticker)
+            
+            # Check if we got a tuple return (new interface) or list (old interface)
+            if isinstance(strategy_result, tuple) and len(strategy_result) == 2:
+                # New interface with (has_signals, signal_data)
+                has_signals, signal_data = strategy_result
+                
+                # Convert signal data to readable signals
+                signals = []
+                if has_signals and signal_data.get('signal_type'):
+                    if signal_data.get('signal_type') == 'BUY':
+                        signals.append(f"🚀 Buy {ticker} at ${signal_data.get('price', data['Close'].iloc[-1]):.2f}")
+                        if 'indicators' in signal_data and is_gold_asset:
+                            signals.append(f"📊 Gold-specific indicators detected: {signal_data['indicators']} bullish signals")
+                    elif signal_data.get('signal_type') == 'SELL':
+                        signals.append(f"📉 Sell {ticker} at ${signal_data.get('price', data['Close'].iloc[-1]):.2f}")
+                        if signal_data.get('reason') == 'take_profit' and 'profit_percent' in signal_data:
+                            signals.append(f"💰 Take profit triggered at {signal_data['profit_percent']:.2f}%")
+                        elif signal_data.get('reason') == 'stop_loss' and 'loss_percent' in signal_data:
+                            signals.append(f"🛑 Stop loss triggered at {signal_data['loss_percent']:.2f}%")
+            else:
+                # Old interface with just signals list
+                signals = strategy_result
             
             # Determine if price is forecasted to increase
             price_trend_up = False
@@ -854,12 +965,45 @@ def send_watchlist_notifications(context: CallbackContext):
                     # Calculate indicators
                     data = calculate_indicators(data)
                     
-                    # Get strategy for this user
-                    strategy_name = get_user_strategy(user_id)
-                    strategy = get_strategy(strategy_name)
+                    # Check if this is a gold-related asset
+                    gold_commodities = ["XAU", "GC=F", "SI=F", "GC", "SI", "HG=F", "HG", "MGC=F"]  # Gold/Silver/Copper commodities
+                    gold_etfs = ["GLD", "IAU", "GOLD", "SGOL", "PHYS", "BAR"]  # Gold ETFs
+                    
+                    is_gold_commodity = ticker.upper() in gold_commodities
+                    is_gold_etf = ticker.upper() in gold_etfs
+                    is_gold_asset = is_gold_commodity or is_gold_etf
+                    
+                    # Choose strategy based on asset type
+                    if is_gold_asset:
+                        strategy_name = "gold"
+                        strategy = get_strategy("gold")
+                        
+                        # Mark the data with detailed asset type for the strategy to use
+                        if is_gold_commodity:
+                            data.attrs['asset_type'] = 'gold_commodity'
+                            logger.info(f"Using Gold Strategy for {ticker} as it's a gold commodity")
+                        else:
+                            data.attrs['asset_type'] = 'gold_etf'
+                            logger.info(f"Using Gold Strategy for {ticker} as it's a gold-related ETF")
+                    else:
+                        # Get the user's preferred strategy for non-gold assets
+                        strategy_name = get_user_strategy(user_id)
+                        strategy = get_strategy(strategy_name)
+                        logger.info(f"Using {strategy.name} for user {user_id} on ticker {ticker}")
                     
                     # Generate signals for the ticker
-                    has_signals, signal_data = strategy.generate_signals(data, user_id, ticker)
+                    # Handle both old and new interface
+                    strategy_result = strategy.generate_signals(data, user_id, ticker)
+                    
+                    # Check if we got a tuple return (new interface) or list (old interface)
+                    if isinstance(strategy_result, tuple) and len(strategy_result) == 2:
+                        # New interface with (has_signals, signal_data)
+                        has_signals, signal_data = strategy_result
+                    else:
+                        # Old interface with just signals list
+                        signals = strategy_result
+                        has_signals = bool(signals)  # True if any signals
+                        signal_data = {}  # Empty dict for old interface
                     
                     # Get the analysis and send it - pass the user_id
                     analysis = analyze_ticker(ticker, user_id)
@@ -1170,6 +1314,9 @@ Example: AAPL daily - Analyzes Apple stock with daily data
 *Strategy Commands:*
 /strategies - View all available trading strategies
 /strategy NAME - Set your preferred trading strategy (e.g., /strategy macd)
+
+*Gold Trading:*
+The bot will automatically use a specialized Gold Strategy for gold-related assets (GLD, IAU, GOLD, etc.)
 
 *SMS Notifications:*
 /sms PHONE_NUMBER - Set your phone number for SMS alerts (e.g., /sms +1234567890)
