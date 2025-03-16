@@ -30,7 +30,25 @@ The pipeline includes several optimizations for running in a CI environment:
 The application detects when it's running in a CI environment through:
 
 1. The `CI=true` environment variable set in the GitHub Actions workflow
-2. Each module checks for this variable and adjusts its behavior accordingly
+2. Each module uses the standardized `IS_CI_ENV` variable to consistently detect the environment:
+
+```python
+# Standardized approach used across all modules
+import os
+
+# Consistent environment detection
+IS_CI_ENV = os.environ.get('CI', 'false').lower() == 'true'
+
+# Conditional behavior based on environment
+if IS_CI_ENV:
+    # CI-optimized code path
+    print("Running in CI environment")
+else:
+    # Normal operation
+    print("Running in standard environment")
+```
+
+This standardized approach ensures consistent behavior across the entire codebase.
 
 ## Setup Process
 

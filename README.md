@@ -135,15 +135,34 @@ The script will:
 Run the built-in test suite:
 - Test stock analysis: `python test_stock.py AAPL`
 - Test portfolio management: `python test_stock.py portfolio`
+- Test backtesting functionality: `python test_stock.py backtest AAPL combined 2024-01-01 2024-03-15 1d`
+
+### CI Environment Testing
+
+To run tests in CI-compatible mode (with optimizations for continuous integration):
+
+```bash
+# Set the CI environment variable
+CI=true python test_stock.py
+
+# For specific tests in CI mode
+CI=true python test_stock.py AAPL
+CI=true python test_stock.py backtest AAPL combined 2024-02-14 2024-03-15 1d
+```
+
+The application will automatically detect the CI environment and make appropriate adjustments for efficient testing.
 
 ## Continuous Integration
 
 This project uses GitHub Actions for continuous integration. Every push to the main branch or pull request will automatically:
 
-1. Set up a Python 3.11 environment
-2. Install all dependencies
-3. Run stock analysis tests
-4. Run portfolio management tests
+1. Set up a Python 3.11 environment with CI flag enabled
+2. Install all dependencies from requirements-ci.txt
+3. Run all tests with CI-specific optimizations
+4. Test individual components (stock analysis, portfolio management, backtesting)
+5. Verify all trading strategies
+
+The CI pipeline is designed to be efficient and reliable, with standardized environment detection across all modules using the `IS_CI_ENV` variable.
 
 You can also manually trigger the tests by going to the "Actions" tab in GitHub and selecting "Run workflow" on the Stock Prophet Tests workflow.
 

@@ -306,6 +306,9 @@ python test_stock.py AAPL
 
 # Test portfolio management
 python test_stock.py portfolio
+
+# Test backtesting functionality
+python test_stock.py backtest AAPL combined 2024-01-01 2024-03-15 1d
 ```
 
 ### CI/CD Pipeline
@@ -313,10 +316,25 @@ python test_stock.py portfolio
 The application includes an automated testing pipeline through GitHub Actions:
 
 1. Each push to the main branch runs automated tests
-2. Tests verify stock analysis and portfolio management
+2. Tests verify stock analysis, portfolio management, and backtesting
 3. All trading strategies are validated
+4. The CI environment is automatically detected and optimized
 
 To view these tests, go to the "Actions" tab in the GitHub repository.
+
+### Running in CI Environment
+
+The application is designed to run efficiently in Continuous Integration environments:
+
+1. Set the `CI=true` environment variable to enable CI mode
+2. In CI mode, the application optimizes resource usage and skips non-essential operations
+3. Testing parameters are automatically adjusted for faster execution
+
+To simulate CI mode locally:
+
+```bash
+CI=true python test_stock.py
+```
 
 ### Custom Parameters
 
