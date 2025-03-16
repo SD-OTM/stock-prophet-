@@ -49,3 +49,6 @@ pyproject.toml
 .idea/
 *.swp
 *.swo
+# Backtest results
+backtest_results/
+backtest_results_combined_*.csv
