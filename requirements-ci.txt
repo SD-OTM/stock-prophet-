@@ -11,9 +11,12 @@ statsmodels>=0.14.0
 # Technical analysis
 pandas-ta>=0.3.14b
 
-# For mocking in CI
-unittest.mock
-responses>=0.23.0 
+# Telegram bot functionality (minimal for CI)
+python-telegram-bot>=13.0
 
-# For specific CI testing needs
-pytest>=7.3.1
+# For testing and mocking in CI
+requests>=2.28.0
+responses>=0.23.0
+
+# Utility packages
+tqdm>=4.65.0
