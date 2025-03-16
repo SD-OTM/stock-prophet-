@@ -1,6 +1,6 @@
 import yfinance as yf
 import pandas_ta as ta
-from telegram import Update, InputFile, ReplyKeyboardMarkup, ReplyKeyboardRemove, KeyboardButton, ParseMode
+from telegram import Update, InputFile, ReplyKeyboardMarkup, ReplyKeyboardRemove, KeyboardButton
 
 # Handle different versions of python-telegram-bot
 try:
@@ -8,6 +8,8 @@ try:
     from telegram.ext import Application, CommandHandler, CallbackContext, MessageHandler, filters, ConversationHandler
     # Create compatibility layer
     Filters = filters
+    # For newer versions, ParseMode is in constants
+    from telegram.constants import ParseMode
 except ImportError:
     # Import from older version (v13)
     from telegram.ext import Updater, CommandHandler, CallbackContext, MessageHandler, Filters, ConversationHandler
@@ -1378,7 +1380,7 @@ def set_phone_number(update: Update, context: CallbackContext):
         update.message.reply_text(
             f"ID: {message_id}\nMr. Otmane, please provide a valid phone number in international format.\n"
             f"Example: /sms +1234567890", 
-            parse_mode=ParseMode.MARKDOWN
+            parse_mode='Markdown'
         )
         return
     
@@ -1390,7 +1392,7 @@ def set_phone_number(update: Update, context: CallbackContext):
         update.message.reply_text(
             f"ID: {message_id}\nMr. Otmane, the phone number format is invalid.\n"
             f"Please use international format starting with + (e.g., +1234567890).",
-            parse_mode=ParseMode.MARKDOWN
+            parse_mode='Markdown'
         )
         return
     
@@ -1420,7 +1422,7 @@ def set_phone_number(update: Update, context: CallbackContext):
             f"However, SMS notifications are not available because Twilio is not fully configured."
         )
     
-    update.message.reply_text(success_message, parse_mode=ParseMode.MARKDOWN)
+    update.message.reply_text(success_message, parse_mode='Markdown')
 
 def help_command(update: Update, context: CallbackContext):
     # Create a list of timeframes for the help text
