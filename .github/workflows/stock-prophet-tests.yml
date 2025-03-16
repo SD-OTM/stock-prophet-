@@ -1,0 +1,52 @@
+name: Stock Prophet Tests
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:  # Allows manual triggering
+  schedule:
+    - cron: '0 0 * * 1-5'  # Run at midnight on weekdays
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        if [ -f requirements-ci.txt ]; then 
+          pip install -r requirements-ci.txt
+        else 
+          pip install -e .
+        fi
+        
+    - name: Run stock analysis tests
+      run: |
+        echo "Testing Apple stock analysis"
+        python test_stock.py AAPL
+        echo "Testing Tesla stock analysis"
+        python test_stock.py TSLA
+        echo "Testing NVIDIA stock analysis"
+        python test_stock.py NVDA
+        
+    - name: Run portfolio test
+      run: |
+        python test_stock.py portfolio
+        
+    - name: Test strategy functionality
+      run: |
+        # This will test all available strategies
+        for strategy in rsi bollinger macd combined; do
+          echo "Testing $strategy strategy"
+          python -c "import main; main.set_user_strategy('test_user', '$strategy'); print(f'Successfully set strategy to {main.get_user_strategy(\"test_user\")}')"
+        done

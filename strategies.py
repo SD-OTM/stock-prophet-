@@ -32,7 +32,7 @@ class RSIStrategy(Strategy):
             'oversold_threshold': 30,
             'overbought_threshold': 70,
             'take_profit': 3.0,  # Percentage - Default 3%
-            'stop_loss': 5.0,    # Percentage - Default 5%
+            'stop_loss': 4.0,    # Percentage - Default 4%
             'use_prediction': True  # Consider prediction for TP/SL
         }
         
@@ -118,7 +118,7 @@ class BollingerBandsStrategy(Strategy):
     def __init__(self, parameters=None):
         default_params = {
             'take_profit': 3.0,  # Percentage - Default 3%
-            'stop_loss': 5.0,    # Percentage - Default 5%
+            'stop_loss': 4.0,    # Percentage - Default 4%
             'band_gap_percent': 0.2,  # Minimum gap between bands as percentage
             'use_prediction': True  # Consider prediction for TP/SL
         }
@@ -214,7 +214,7 @@ class MACDStrategy(Strategy):
     def __init__(self, parameters=None):
         default_params = {
             'take_profit': 3.0,  # Percentage - Default 3%
-            'stop_loss': 5.0,    # Percentage - Default 5%
+            'stop_loss': 4.0,    # Percentage - Default 4%
             'signal_threshold': 0.01,  # Minimum MACD-Signal difference
             'use_prediction': True  # Consider prediction for TP/SL
         }
@@ -306,7 +306,7 @@ class CombinedStrategy(Strategy):
     def __init__(self, parameters=None):
         default_params = {
             'take_profit': 3.0,  # Percentage - Default 3%
-            'stop_loss': 5.0,    # Percentage - Default 5%
+            'stop_loss': 4.0,    # Percentage - Default 4%
             'rsi_oversold': 30,
             'rsi_overbought': 70,
             'min_indicators': 2,  # Minimum number of indicators confirming for a signal
