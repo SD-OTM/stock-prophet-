@@ -1,6 +1,6 @@
 import yfinance as yf
 import pandas_ta as ta
-from telegram import Update, InputFile, ReplyKeyboardMarkup, ReplyKeyboardRemove, KeyboardButton
+from telegram import Update, InputFile, ReplyKeyboardMarkup, ReplyKeyboardRemove, KeyboardButton, ParseMode
 
 # Handle different versions of python-telegram-bot
 try:
@@ -18,6 +18,8 @@ import threading
 import json
 from datetime import datetime
 from collections import defaultdict
+import sms_notifications
+from sms_notifications import send_trading_signal_sms, send_price_alert_sms, send_portfolio_summary_sms
 from statsmodels.tsa.arima.model import ARIMA
 import numpy as np
 import io
@@ -62,6 +64,10 @@ last_notification_time = defaultdict(lambda: defaultdict(int))
 # Files to persist user data
 WATCHLIST_FILE = "user_watchlists.json"
 PORTFOLIO_FILE = "user_portfolios.json"
+PHONE_NUMBERS_FILE = "user_phone_numbers.json"
+
+# Dictionary to store user phone numbers
+user_phone_numbers = {}
 
 # Conversation states for portfolio management
 TICKER, PRICE, QUANTITY = range(3)
@@ -115,6 +121,26 @@ def save_portfolios():
         logger.info(f"Saved portfolios for {len(user_portfolios)} users")
     except Exception as e:
         logger.error(f"Error saving portfolios: {e}")
+        
+# Load phone numbers from file if it exists
+def load_phone_numbers():
+    global user_phone_numbers
+    try:
+        if os.path.exists(PHONE_NUMBERS_FILE):
+            with open(PHONE_NUMBERS_FILE, 'r') as f:
+                user_phone_numbers = json.load(f)
+            logger.info(f"Loaded phone numbers for {len(user_phone_numbers)} users")
+    except Exception as e:
+        logger.error(f"Error loading phone numbers: {e}")
+        
+# Save phone numbers to file
+def save_phone_numbers():
+    try:
+        with open(PHONE_NUMBERS_FILE, 'w') as f:
+            json.dump(user_phone_numbers, f)
+        logger.info(f"Saved phone numbers for {len(user_phone_numbers)} users")
+    except Exception as e:
+        logger.error(f"Error saving phone numbers: {e}")
 
 # Available timeframes for analysis
 TIMEFRAMES = {
@@ -515,12 +541,16 @@ def get_user_strategy(user_id):
 # Function to handle the /start command
 def start(update: Update, context: CallbackContext):
     user_name = update.message.from_user.first_name
-    welcome_message = f"Welcome, Mr. Otmane! I'm your Stock Prophet bot. Send me a stock ticker (e.g., NVDA) to get trading signals and forecasts."
-    update.message.reply_text(welcome_message)
+    message_id = f"MSG-{int(time.time())}-START"
+    welcome_message = f"ID: {message_id}\n*Welcome, Mr. Otmane!* I'm your Stock Prophet bot. Send me a stock ticker (e.g., *NVDA*) to get trading signals and forecasts."
+    update.message.reply_text(welcome_message, parse_mode='Markdown')
 
 # Function to analyze a stock ticker
 def analyze_ticker(ticker, user_id="test_user", timeframe=None):
     try:
+        # Generate a unique message ID (timestamp + ticker)
+        message_id = f"MSG-{int(time.time())}-{ticker}"
+        
         # If timeframe is specified, use it, otherwise use default
         if timeframe and timeframe in TIMEFRAMES:
             data = get_stock_data(ticker, timeframe=timeframe)
@@ -533,7 +563,7 @@ def analyze_ticker(ticker, user_id="test_user", timeframe=None):
         # Check if we have valid data
         if data is None or data.empty:
             logger.error(f"No data returned for ticker {ticker}")
-            return f"Mr. Otmane, I couldn't retrieve data for {ticker}. The ticker may be invalid or there might be connection issues."
+            return f"ID: {message_id}\nMr. Otmane, I couldn't retrieve data for {ticker}. The ticker may be invalid or there might be connection issues."
         
         # Log data shape for debugging
         logger.info(f"Retrieved data for {ticker} with shape: {data.shape}")
@@ -570,7 +600,8 @@ def analyze_ticker(ticker, user_id="test_user", timeframe=None):
             sentiment_summary, sentiment_data = get_sentiment_analysis(ticker)
             
             response = (
-                f"Mr. Otmane, here's your analysis for {ticker}:\n\n"
+                f"ID: {message_id}\n"
+                f"Mr. Otmane, here's your analysis for *{ticker}*:\n\n"
                 f"{sentiment_summary}\n"
                 f"📊 Trend: {trend}\n\n"
                 f"📉 Technical Indicators:\n"
@@ -649,8 +680,9 @@ def handle_ticker(update: Update, context: CallbackContext):
     timeframe = None
     
     if update.message.text.startswith('/ticker'):
+        message_id = f"MSG-{int(time.time())}-TICKER-ARGS"
         if not context.args:
-            update.message.reply_text("Mr. Otmane, please provide a ticker symbol. Example: /ticker AAPL")
+            update.message.reply_text(f"ID: {message_id}\nMr. Otmane, please provide a ticker symbol. Example: /ticker AAPL")
             return
         ticker = context.args[0].upper()
         
@@ -667,8 +699,9 @@ def handle_ticker(update: Update, context: CallbackContext):
             timeframe = parts[1].lower()
     
     # Indicate that analysis is in progress
+    message_id = f"MSG-{int(time.time())}-START"
     timeframe_text = f" with {TIMEFRAMES[timeframe]['description']}" if timeframe else ""
-    update.message.reply_text(f"Analyzing {ticker}{timeframe_text}... please wait, Mr. Otmane.")
+    update.message.reply_text(f"ID: {message_id}\nAnalyzing *{ticker}*{timeframe_text}... please wait, Mr. Otmane.")
     
     try:
         # Get stock data with specified timeframe
@@ -679,7 +712,8 @@ def handle_ticker(update: Update, context: CallbackContext):
         
         # Check if we have valid data
         if data is None or data.empty:
-            update.message.reply_text(f"Mr. Otmane, I couldn't retrieve data for {ticker}. The ticker may be invalid or there might be connection issues.")
+            message_id = f"MSG-{int(time.time())}-ERROR"
+            update.message.reply_text(f"ID: {message_id}\nMr. Otmane, I couldn't retrieve data for *{ticker}*. The ticker may be invalid or there might be connection issues.", parse_mode='Markdown')
             return
         
         # Calculate indicators
@@ -705,10 +739,12 @@ def handle_ticker(update: Update, context: CallbackContext):
                 f.write(img_data)
             
             # Send the chart to the user
+            message_id = f"MSG-{int(time.time())}-CHART"
             with open(img_path, 'rb') as photo:
                 update.message.reply_photo(
                     photo=photo,
-                    caption=f"Mr. Otmane, here's your technical analysis chart for {ticker}{timeframe_text}"
+                    caption=f"ID: {message_id}\nMr. Otmane, here's your technical analysis chart for *{ticker}*{timeframe_text}",
+                    parse_mode='Markdown'
                 )
             
             # Analyze the ticker - pass the user ID and timeframe
@@ -723,19 +759,22 @@ def handle_ticker(update: Update, context: CallbackContext):
             # If chart fails, still send the text analysis
             response = analyze_ticker(ticker, user_id, timeframe)
             update.message.reply_text(response)
-            update.message.reply_text("Mr. Otmane, I couldn't generate a chart visualization at this time.")
+            message_id = f"MSG-{int(time.time())}-CHART-ERROR"
+            update.message.reply_text(f"ID: {message_id}\nMr. Otmane, I couldn't generate a chart visualization for *{ticker}* at this time.", parse_mode='Markdown')
     
     except Exception as e:
         logger.error(f"Error in handle_ticker: {e}")
-        update.message.reply_text(f"Mr. Otmane, there was an error analyzing {ticker}. Please try again later.")
+        message_id = f"MSG-{int(time.time())}-ERROR"
+        update.message.reply_text(f"ID: {message_id}\nMr. Otmane, there was an error analyzing *{ticker}*. Please try again later.", parse_mode='Markdown')
 
 # Function to add a stock to the watchlist
 def add_to_watchlist(update: Update, context: CallbackContext):
     user_id = str(update.message.from_user.id)
     
     # Check if ticker is provided
+    message_id = f"MSG-{int(time.time())}-ADD-ARGS"
     if not context.args:
-        update.message.reply_text("Mr. Otmane, please provide a ticker symbol. Example: /add AAPL")
+        update.message.reply_text(f"ID: {message_id}\nMr. Otmane, please provide a ticker symbol. Example: /add AAPL")
         return
     
     ticker = context.args[0].upper()
@@ -743,24 +782,28 @@ def add_to_watchlist(update: Update, context: CallbackContext):
     # Verify if the ticker exists by trying to fetch data
     data = get_stock_data(ticker)
     if data is None or data.empty:
-        update.message.reply_text(f"Mr. Otmane, I could not add {ticker} to your watchlist. The ticker may be invalid.")
+        message_id = f"MSG-{int(time.time())}-ADD-INVALID"
+        update.message.reply_text(f"ID: {message_id}\nMr. Otmane, I could not add *{ticker}* to your watchlist. The ticker may be invalid.", parse_mode='Markdown')
         return
     
     # Add to watchlist if not already there
     if ticker not in user_watchlists[user_id]:
         user_watchlists[user_id].append(ticker)
         save_watchlists()
-        update.message.reply_text(f"Mr. Otmane, I've added {ticker} to your watchlist! You'll receive regular updates on this stock every 30 minutes.")
+        message_id = f"MSG-{int(time.time())}-ADD"
+        update.message.reply_text(f"ID: {message_id}\nMr. Otmane, I've added *{ticker}* to your watchlist! You'll receive regular updates on this stock every 30 minutes.", parse_mode='Markdown')
     else:
-        update.message.reply_text(f"Mr. Otmane, {ticker} is already in your watchlist.")
+        message_id = f"MSG-{int(time.time())}-EXISTS"
+        update.message.reply_text(f"ID: {message_id}\nMr. Otmane, *{ticker}* is already in your watchlist.", parse_mode='Markdown')
 
 # Function to remove a stock from the watchlist
 def remove_from_watchlist(update: Update, context: CallbackContext):
     user_id = str(update.message.from_user.id)
     
     # Check if ticker is provided
+    message_id = f"MSG-{int(time.time())}-REMOVE-ARGS"
     if not context.args:
-        update.message.reply_text("Please provide a ticker symbol. Example: /remove AAPL")
+        update.message.reply_text(f"ID: {message_id}\nMr. Otmane, please provide a ticker symbol. Example: /remove AAPL")
         return
     
     ticker = context.args[0].upper()
@@ -769,20 +812,26 @@ def remove_from_watchlist(update: Update, context: CallbackContext):
     if ticker in user_watchlists[user_id]:
         user_watchlists[user_id].remove(ticker)
         save_watchlists()
-        update.message.reply_text(f"Removed {ticker} from your watchlist.")
+        message_id = f"MSG-{int(time.time())}-REMOVE"
+        update.message.reply_text(f"ID: {message_id}\nMr. Otmane, I've removed *{ticker}* from your watchlist.", parse_mode='Markdown')
     else:
-        update.message.reply_text(f"{ticker} is not in your watchlist.")
+        message_id = f"MSG-{int(time.time())}-NOT-FOUND"
+        update.message.reply_text(f"ID: {message_id}\nMr. Otmane, *{ticker}* is not in your watchlist.", parse_mode='Markdown')
 
 # Function to show the user's watchlist
 def show_watchlist(update: Update, context: CallbackContext):
     user_id = str(update.message.from_user.id)
     
     # Display watchlist
+    message_id = f"MSG-{int(time.time())}-WATCHLIST"
     if user_id in user_watchlists and user_watchlists[user_id]:
-        tickers = ', '.join(user_watchlists[user_id])
-        update.message.reply_text(f"Your watchlist: {tickers}\n\nYou'll receive automatic forecasts for these stocks every 30 minutes.")
+        formatted_tickers = []
+        for ticker in user_watchlists[user_id]:
+            formatted_tickers.append(f"*{ticker}*")
+        tickers_str = ', '.join(formatted_tickers)
+        update.message.reply_text(f"ID: {message_id}\nMr. Otmane, your watchlist: {tickers_str}\n\nYou'll receive automatic forecasts for these stocks every 30 minutes.", parse_mode='Markdown')
     else:
-        update.message.reply_text("Your watchlist is empty. Add stocks with /add TICKER")
+        update.message.reply_text(f"ID: {message_id}\nMr. Otmane, your watchlist is empty. Add stocks with /add TICKER")
 
 # Function to send automatic notifications for watchlist stocks
 def send_watchlist_notifications(context: CallbackContext):
@@ -797,6 +846,21 @@ def send_watchlist_notifications(context: CallbackContext):
             last_time = last_notification_time[user_id][ticker]
             if now - last_time >= notification_interval:
                 try:
+                    # Get the stock data and analyze it
+                    data = get_stock_data(ticker)
+                    if data is None:
+                        continue  # Skip if we can't get data
+                    
+                    # Calculate indicators
+                    data = calculate_indicators(data)
+                    
+                    # Get strategy for this user
+                    strategy_name = get_user_strategy(user_id)
+                    strategy = get_strategy(strategy_name)
+                    
+                    # Generate signals for the ticker
+                    has_signals, signal_data = strategy.generate_signals(data, user_id, ticker)
+                    
                     # Get the analysis and send it - pass the user_id
                     analysis = analyze_ticker(ticker, user_id)
                     context.bot.send_message(chat_id=user_id, text=analysis)
@@ -804,6 +868,40 @@ def send_watchlist_notifications(context: CallbackContext):
                     # Update the last notification time
                     last_notification_time[user_id][ticker] = now
                     logger.info(f"Sent automated update for {ticker} to user {user_id}")
+                    
+                    # Check if user has a phone number for SMS notifications
+                    if user_id in user_phone_numbers and has_signals:
+                        phone_number = user_phone_numbers[user_id]
+                        current_price = data['Close'].iloc[-1]
+                        
+                        # Send SMS for buy/sell signals if there are any
+                        if signal_data.get('signal_type') in ['BUY', 'SELL']:
+                            sms_sent = send_trading_signal_sms(
+                                phone_number,
+                                ticker,
+                                signal_data.get('signal_type'),
+                                current_price,
+                                strategy_name
+                            )
+                            if sms_sent:
+                                logger.info(f"Sent SMS trading signal for {ticker} to {user_id}")
+                            else:
+                                logger.error(f"Failed to send SMS trading signal for {ticker} to {user_id}")
+                        
+                        # Send price alerts for significant price movements
+                        elif signal_data.get('price_change', 0) >= 5.0:  # 5% or more price change
+                            sms_sent = send_price_alert_sms(
+                                phone_number,
+                                ticker,
+                                current_price,
+                                signal_data.get('price_change', 0),
+                                'SPIKE' if signal_data.get('price_change', 0) > 0 else 'DROP'
+                            )
+                            if sms_sent:
+                                logger.info(f"Sent SMS price alert for {ticker} to {user_id}")
+                            else:
+                                logger.error(f"Failed to send SMS price alert for {ticker} to {user_id}")
+                    
                 except Exception as e:
                     logger.error(f"Error sending notification for {ticker} to user {user_id}: {e}")
 
@@ -811,8 +909,9 @@ def send_watchlist_notifications(context: CallbackContext):
 def show_portfolio(update: Update, context: CallbackContext):
     user_id = str(update.message.from_user.id)
     
+    message_id = f"MSG-{int(time.time())}-PORTFOLIO"
     if user_id not in user_portfolios or not user_portfolios[user_id]:
-        update.message.reply_text("Your portfolio is empty. Use /buy TICKER PRICE QUANTITY to add positions.")
+        update.message.reply_text(f"ID: {message_id}\nMr. Otmane, your portfolio is empty. Use /buy TICKER PRICE QUANTITY to add positions.")
         return
     
     total_value = 0
@@ -868,6 +967,7 @@ def show_portfolio(update: Update, context: CallbackContext):
     else:
         portfolio_text += f"Total P/L: -${abs(total_profit_loss):.2f} ({total_profit_loss_pct:.2f}%)"
     
+    portfolio_text = f"ID: {message_id}\n{portfolio_text}"
     update.message.reply_text(portfolio_text, parse_mode='Markdown')
 
 # Function to add a stock to the portfolio
@@ -875,8 +975,9 @@ def add_to_portfolio(update: Update, context: CallbackContext):
     user_id = str(update.message.from_user.id)
     
     # Check if all arguments are provided (ticker, price, quantity)
+    message_id = f"MSG-{int(time.time())}-BUY-ARGS"
     if len(context.args) < 3:
-        update.message.reply_text("Please provide ticker, price, and quantity. Example: /buy AAPL 150.00 10")
+        update.message.reply_text(f"ID: {message_id}\nMr. Otmane, please provide ticker, price, and quantity. Example: /buy AAPL 150.00 10")
         return
     
     try:
@@ -887,28 +988,33 @@ def add_to_portfolio(update: Update, context: CallbackContext):
         # Verify the ticker exists
         data = get_stock_data(ticker)
         if data is None or data.empty:
-            update.message.reply_text(f"Could not verify {ticker}. Please check the ticker symbol.")
+            message_id = f"MSG-{int(time.time())}-BUY-INVALID"
+            update.message.reply_text(f"ID: {message_id}\nMr. Otmane, I could not verify *{ticker}*. Please check the ticker symbol.", parse_mode='Markdown')
             return
         
         # Add to portfolio
         user_portfolios[user_id].append([ticker, price, quantity])
         save_portfolios()
         
-        update.message.reply_text(f"Added {quantity} shares of {ticker} at ${price:.2f} to your portfolio.")
+        message_id = f"MSG-{int(time.time())}-BUY-SUCCESS"
+        update.message.reply_text(f"ID: {message_id}\nMr. Otmane, I've added {quantity} shares of *{ticker}* at ${price:.2f} to your portfolio.", parse_mode='Markdown')
     
     except ValueError:
-        update.message.reply_text("Invalid price or quantity. Please use numbers only.")
+        message_id = f"MSG-{int(time.time())}-BUY-VALUE-ERROR"
+        update.message.reply_text(f"ID: {message_id}\nMr. Otmane, the price or quantity you provided is invalid. Please use numbers only.")
     except Exception as e:
         logger.error(f"Error adding to portfolio: {e}")
-        update.message.reply_text(f"Error adding to portfolio: {str(e)}")
+        message_id = f"MSG-{int(time.time())}-BUY-ERROR"
+        update.message.reply_text(f"ID: {message_id}\nError adding to portfolio: {str(e)}")
 
 # Function to remove a stock from the portfolio
 def remove_from_portfolio(update: Update, context: CallbackContext):
     user_id = str(update.message.from_user.id)
     
     # Check if ticker is provided
+    message_id = f"MSG-{int(time.time())}-SELL-ARGS"
     if not context.args:
-        update.message.reply_text("Please provide a ticker symbol. Example: /sell AAPL")
+        update.message.reply_text(f"ID: {message_id}\nMr. Otmane, please provide a ticker symbol. Example: /sell AAPL")
         return
     
     ticker = context.args[0].upper()
@@ -923,15 +1029,18 @@ def remove_from_portfolio(update: Update, context: CallbackContext):
         # Remove positions in reverse order to avoid index issues
         for i in sorted(positions_to_remove, reverse=True):
             removed = user_portfolios[user_id].pop(i)
-            update.message.reply_text(f"Removed {removed[2]} shares of {removed[0]} from your portfolio.")
+            message_id = f"MSG-{int(time.time())}-SELL-SUCCESS"
+            update.message.reply_text(f"ID: {message_id}\nMr. Otmane, I've removed {removed[2]} shares of *{removed[0]}* from your portfolio.", parse_mode='Markdown')
         
         save_portfolios()
         
         # If no positions were found
         if not positions_to_remove:
-            update.message.reply_text(f"No {ticker} positions found in your portfolio.")
+            message_id = f"MSG-{int(time.time())}-SELL-NOT-FOUND"
+            update.message.reply_text(f"ID: {message_id}\nMr. Otmane, no *{ticker}* positions were found in your portfolio.", parse_mode='Markdown')
     else:
-        update.message.reply_text("Your portfolio is empty.")
+        message_id = f"MSG-{int(time.time())}-SELL-EMPTY"
+        update.message.reply_text(f"ID: {message_id}\nMr. Otmane, your portfolio is empty. Use /buy TICKER PRICE QUANTITY to add positions.")
 
 # Function to get strategy information
 def get_strategy_info(update: Update, context: CallbackContext):
@@ -939,14 +1048,15 @@ def get_strategy_info(update: Update, context: CallbackContext):
     user_id = str(update.message.from_user.id)
     current_strategy = get_user_strategy(user_id)
     
-    response = "*Available Trading Strategies:*\n\n"
+    message_id = f"MSG-{int(time.time())}-STRATEGIES"
+    response = f"ID: {message_id}\n*Available Trading Strategies:*\n\n"
     for name, description in strategies_info.items():
         if name == current_strategy:
             response += f"✅ *{name}* (ACTIVE): {description}\n\n"
         else:
             response += f"• *{name}*: {description}\n\n"
     
-    response += "\nUse /strategy STRATEGY_NAME to change your active strategy."
+    response += "\nMr. Otmane, use /strategy STRATEGY_NAME to change your active strategy."
     update.message.reply_text(response, parse_mode='Markdown')
 
 # Function to set strategy
@@ -954,26 +1064,87 @@ def set_strategy(update: Update, context: CallbackContext):
     user_id = str(update.message.from_user.id)
     
     # Check if strategy name is provided
+    message_id = f"MSG-{int(time.time())}-STRATEGY-ARGS"
     if not context.args:
-        update.message.reply_text("Please provide a strategy name. Example: /strategy rsi\nUse /strategies to see available options.")
+        update.message.reply_text(f"ID: {message_id}\nMr. Otmane, please provide a strategy name. Example: /strategy rsi\nUse /strategies to see available options.")
         return
     
     strategy_name = context.args[0].lower()
     
     # Update the user's strategy
     if set_user_strategy(user_id, strategy_name):
-        update.message.reply_text(f"Mr. Otmane, your trading strategy has been updated to: *{strategy_name}*", parse_mode='Markdown')
+        message_id = f"MSG-{int(time.time())}-STRATEGY-SUCCESS"
+        update.message.reply_text(f"ID: {message_id}\nMr. Otmane, your trading strategy has been updated to: *{strategy_name}*", parse_mode='Markdown')
     else:
-        update.message.reply_text(f"Sorry, '{strategy_name}' is not a valid strategy. Use /strategies to see available options.")
+        message_id = f"MSG-{int(time.time())}-STRATEGY-INVALID"
+        update.message.reply_text(f"ID: {message_id}\nMr. Otmane, sorry, '*{strategy_name}*' is not a valid strategy. Use /strategies to see available options.", parse_mode='Markdown')
 
 # Function to display available commands
+# Function to set user's phone number for SMS alerts
+def set_phone_number(update: Update, context: CallbackContext):
+    """Command handler for /sms command to set user's phone number for SMS alerts"""
+    user = update.effective_user
+    user_id = str(user.id)
+    message_id = f"MSG-{int(time.time())}-SMS"
+    
+    # Check if the user provided a phone number
+    if not context.args or len(context.args) != 1:
+        update.message.reply_text(
+            f"ID: {message_id}\nMr. Otmane, please provide a valid phone number in international format.\n"
+            f"Example: /sms +1234567890", 
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+    
+    # Get the phone number from the command
+    phone_number = context.args[0].strip()
+    
+    # Simple validation - must start with + and have at least 10 digits
+    if not (phone_number.startswith('+') and len(phone_number) >= 10 and phone_number[1:].isdigit()):
+        update.message.reply_text(
+            f"ID: {message_id}\nMr. Otmane, the phone number format is invalid.\n"
+            f"Please use international format starting with + (e.g., +1234567890).",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+    
+    # Save the phone number
+    user_phone_numbers[user_id] = phone_number
+    save_phone_numbers()
+    
+    # Test if Twilio is configured
+    twilio_ready = sms_notifications.is_twilio_configured()
+    
+    if twilio_ready:
+        # Send a test message if possible
+        test_sent = sms_notifications.test_sms_service(phone_number)
+        if test_sent:
+            success_message = (
+                f"ID: {message_id}\nMr. Otmane, your phone number *{phone_number}* has been saved successfully.\n"
+                f"A test message has been sent to verify the service."
+            )
+        else:
+            success_message = (
+                f"ID: {message_id}\nMr. Otmane, your phone number *{phone_number}* has been saved successfully.\n"
+                f"However, there was an issue sending the test SMS. Your settings are saved, but SMS delivery may not work."
+            )
+    else:
+        success_message = (
+            f"ID: {message_id}\nMr. Otmane, your phone number *{phone_number}* has been saved successfully.\n"
+            f"However, SMS notifications are not available because Twilio is not fully configured."
+        )
+    
+    update.message.reply_text(success_message, parse_mode=ParseMode.MARKDOWN)
+
 def help_command(update: Update, context: CallbackContext):
     # Create a list of timeframes for the help text
     timeframe_help = ""
     for name, details in TIMEFRAMES.items():
         timeframe_help += f"• {name} - {details['description']}\n"
     
+    message_id = f"MSG-{int(time.time())}-HELP"
     help_text = f"""
+ID: {message_id}
 *Welcome, Mr. Otmane!*
 
 *Stock Prophet Bot Commands*
@@ -999,6 +1170,9 @@ Example: AAPL daily - Analyzes Apple stock with daily data
 *Strategy Commands:*
 /strategies - View all available trading strategies
 /strategy NAME - Set your preferred trading strategy (e.g., /strategy macd)
+
+*SMS Notifications:*
+/sms PHONE_NUMBER - Set your phone number for SMS alerts (e.g., /sms +1234567890)
 
 *Backtest Command:*
 /backtest TICKER STRATEGY START_DATE END_DATE TIMEFRAME - Test a strategy on historical data
@@ -1048,7 +1222,8 @@ def set_bot_commands(updater):
             BotCommand("buy", "Add a stock to your portfolio (e.g., /buy AAPL 150.00 10)"),
             BotCommand("sell", "Remove a stock from your portfolio"),
             BotCommand("strategies", "View all available trading strategies"),
-            BotCommand("strategy", "Set your preferred trading strategy")
+            BotCommand("strategy", "Set your preferred trading strategy"),
+            BotCommand("sms", "Set your phone number for SMS alerts (e.g., /sms +1234567890)")
         ]
         
         updater.bot.set_my_commands(commands)
@@ -1099,6 +1274,9 @@ def run_telegram_bot():
         dispatcher.add_handler(CommandHandler("strategies", get_strategy_info))
         dispatcher.add_handler(CommandHandler("strategy", set_strategy))
         
+        # Add SMS notifications command handler
+        dispatcher.add_handler(CommandHandler("sms", set_phone_number))
+        
         # Add a handler for direct ticker input (no command)
         dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_ticker))
         
@@ -1137,6 +1315,13 @@ def test_mode():
 
 # Main entry point
 def main():
+    # Load user phone numbers for SMS notifications
+    load_phone_numbers()
+    
+    # Load watchlists and portfolios
+    load_watchlists()
+    load_portfolios()
+    
     # Try to run the Telegram bot
     if not run_telegram_bot():
         # If Telegram bot fails, run in test mode

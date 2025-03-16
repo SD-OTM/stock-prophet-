@@ -1,0 +1,8 @@
+Ticker,Strategy,Total Trades,Winning Trades,Win Rate (%),Total Return (%),Profit Factor,Max Drawdown (%),Avg Profit (%),Avg Loss (%),Chart Path,Error
+AAPL,combined,0,0,0,0,0,0,0,0,,'BacktestResult' object has no attribute 'total_trades'
+MSFT,combined,0,0,0,0,0,0,0,0,,'BacktestResult' object has no attribute 'total_trades'
+GOOGL,combined,0,0,0,0,0,0,0,0,,'BacktestResult' object has no attribute 'total_trades'
+AMZN,combined,0,0,0,0,0,0,0,0,,'BacktestResult' object has no attribute 'total_trades'
+META,combined,0,0,0,0,0,0,0,0,,'BacktestResult' object has no attribute 'total_trades'
+TSLA,combined,0,0,0,0,0,0,0,0,,'BacktestResult' object has no attribute 'total_trades'
+NVDA,combined,0,0,0,0,0,0,0,0,,'BacktestResult' object has no attribute 'total_trades'

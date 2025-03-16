@@ -17,7 +17,14 @@ class Strategy:
         self.parameters = parameters or {}
         
     def generate_signals(self, data, user_id, ticker, user_data=None):
-        """Generate buy/sell signals - to be implemented by subclasses"""
+        """
+        Generate buy/sell signals - to be implemented by subclasses
+        
+        Returns:
+            tuple: (has_signals, signal_data) where:
+                - has_signals is a boolean indicating if any signals were generated
+                - signal_data is a dictionary with signal information (signal_type, price, etc.)
+        """
         raise NotImplementedError("Subclasses must implement generate_signals()")
 
     def get_description(self):
