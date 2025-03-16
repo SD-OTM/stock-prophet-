@@ -1,0 +1,8 @@
+matplotlib
+numpy
+pandas
+pandas-ta
+python-telegram-bot==13.15  # Using v13 for compatibility with the existing code
+statsmodels
+yfinance
+twilio  # For SMS notifications
