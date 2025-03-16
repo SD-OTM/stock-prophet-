@@ -18,6 +18,9 @@ from PIL import Image
 # Import visualization module
 from visualization import generate_chart, save_chart
 
+# Import sentiment analysis module
+from sentiment import get_sentiment_analysis
+
 # Import strategies module
 from strategies import get_strategy, update_strategy_params, get_available_strategies_info, AVAILABLE_STRATEGIES
 
@@ -94,9 +97,25 @@ def save_portfolios():
     except Exception as e:
         logger.error(f"Error saving portfolios: {e}")
 
+# Available timeframes for analysis
+TIMEFRAMES = {
+    "hourly": {"period": "1d", "interval": "1h", "description": "Hourly (last 24 hours)"},
+    "daily": {"period": "1mo", "interval": "1d", "description": "Daily (last month)"},
+    "weekly": {"period": "6mo", "interval": "1wk", "description": "Weekly (last 6 months)"},
+    "monthly": {"period": "2y", "interval": "1mo", "description": "Monthly (last 2 years)"}
+}
+
+# Default timeframe
+DEFAULT_TIMEFRAME = "hourly"
+
 # Function to fetch stock data
-def get_stock_data(ticker, period="1d", interval="1h"):
+def get_stock_data(ticker, period="1d", interval="1h", timeframe=None):
     try:
+        # If timeframe is specified, use its settings
+        if timeframe and timeframe in TIMEFRAMES:
+            period = TIMEFRAMES[timeframe]["period"]
+            interval = TIMEFRAMES[timeframe]["interval"]
+        
         logger.info(f"Fetching data for {ticker} with period={period}, interval={interval}")
         stock = yf.Ticker(ticker)
         data = stock.history(period=period, interval=interval)
@@ -156,21 +175,43 @@ def calculate_indicators(data):
         # Apply indicators only if we have enough data
         if len(data) >= 3:  # Absolute minimum for any technical indicator
             # RSI
-            data['RSI'] = ta.rsi(data['Close'], length=rsi_length)
-            
+            rsi = ta.rsi(data['Close'], length=rsi_length)
+            if rsi is not None and not rsi.empty:
+                data['RSI'] = rsi
+            else:
+                data['RSI'] = 50  # Neutral RSI
+
             # EMAs (short-term and long-term)
-            data['EMA_9'] = ta.ema(data['Close'], length=ema_short)
-            data['EMA_21'] = ta.ema(data['Close'], length=ema_long)
+            ema9 = ta.ema(data['Close'], length=ema_short)
+            if ema9 is not None and not ema9.empty:
+                data['EMA_9'] = ema9
+            else:
+                data['EMA_9'] = data['Close']
+
+            ema21 = ta.ema(data['Close'], length=ema_long)
+            if ema21 is not None and not ema21.empty:
+                data['EMA_21'] = ema21
+            else:
+                data['EMA_21'] = data['Close']
             
             # Only calculate longer EMAs if we have enough data
             if len(data) > 10:
-                data['EMA_50'] = ta.ema(data['Close'], length=min(50, len(data) // 2))
+                ema50 = ta.ema(data['Close'], length=min(50, len(data) // 2))
+                if ema50 is not None and not ema50.empty:
+                    data['EMA_50'] = ema50
+                else:
+                    data['EMA_50'] = data['Close']
+
             if len(data) > 20:
-                data['EMA_200'] = ta.ema(data['Close'], length=min(200, len(data) // 2))
+                ema200 = ta.ema(data['Close'], length=min(200, len(data) // 2))
+                if ema200 is not None and not ema200.empty:
+                    data['EMA_200'] = ema200
+                else:
+                    data['EMA_200'] = data['Close']
             
             # Bollinger Bands
             bbands = ta.bbands(data['Close'], length=bb_length)
-            if not bbands.empty:
+            if bbands is not None and not bbands.empty:
                 # The column names in the bbands dataframe will include the length parameter
                 bb_upper_col = f"BBU_{bb_length}_2.0"
                 bb_middle_col = f"BBM_{bb_length}_2.0"
@@ -184,34 +225,72 @@ def calculate_indicators(data):
                     data['BB_upper'] = bbands[bb_upper_col]
                     data['BB_middle'] = bbands[bb_middle_col]
                     data['BB_lower'] = bbands[bb_lower_col]
+                else:
+                    # If columns not found, provide fallback values
+                    data['BB_upper'] = data['Close'] * 1.05  # 5% above close
+                    data['BB_middle'] = data['Close']
+                    data['BB_lower'] = data['Close'] * 0.95  # 5% below close
+            else:
+                # If bbands is None or empty, provide fallback values
+                data['BB_upper'] = data['Close'] * 1.05  # 5% above close
+                data['BB_middle'] = data['Close']
+                data['BB_lower'] = data['Close'] * 0.95  # 5% below close
             
             # MACD - only if we have enough data points
             if len(data) > macd_slow:
                 macd = ta.macd(data['Close'], fast=macd_fast, slow=macd_slow, signal=macd_signal)
                 # Get the column names from the macd dataframe
-                if not macd.empty and len(macd.columns) >= 3:
+                if macd is not None and not macd.empty and len(macd.columns) >= 3:
                     macd_col = macd.columns[0]  # MACD line
                     signal_col = macd.columns[1]  # Signal line
                     hist_col = macd.columns[2]  # Histogram
                     data['MACD'] = macd[macd_col]
                     data['MACD_Signal'] = macd[signal_col]
                     data['MACD_Hist'] = macd[hist_col]
+                else:
+                    # Fallback values
+                    data['MACD'] = 0
+                    data['MACD_Signal'] = 0
+                    data['MACD_Hist'] = 0
+            else:
+                # Not enough data for MACD
+                data['MACD'] = 0
+                data['MACD_Signal'] = 0
+                data['MACD_Hist'] = 0
             
             # Stochastic Oscillator
             if len(data) > stoch_k:
                 stoch = ta.stoch(data['High'], data['Low'], data['Close'], k=stoch_k, d=stoch_d)
-                if not stoch.empty and len(stoch.columns) >= 2:
+                if stoch is not None and not stoch.empty and len(stoch.columns) >= 2:
                     data['Stoch_K'] = stoch.iloc[:, 0]  # %K line
                     data['Stoch_D'] = stoch.iloc[:, 1]  # %D line
+                else:
+                    # Fallback values
+                    data['Stoch_K'] = 50  # Neutral
+                    data['Stoch_D'] = 50  # Neutral
+            else:
+                # Not enough data
+                data['Stoch_K'] = 50  # Neutral
+                data['Stoch_D'] = 50  # Neutral
             
             # Average Directional Index (ADX)
             # ADX requires more data to be reliable
             if len(data) >= 14:
                 adx = ta.adx(data['High'], data['Low'], data['Close'], length=min(14, len(data) // 2))
-                if not adx.empty and len(adx.columns) >= 3:
+                if adx is not None and not adx.empty and len(adx.columns) >= 3:
                     data['ADX'] = adx.iloc[:, 2]  # ADX line
                     data['DI+'] = adx.iloc[:, 0]  # +DI line
                     data['DI-'] = adx.iloc[:, 1]  # -DI line
+                else:
+                    # Fallback values
+                    data['ADX'] = 20  # Neutral ADX
+                    data['DI+'] = 20
+                    data['DI-'] = 20
+            else:
+                # Not enough data
+                data['ADX'] = 20  # Neutral ADX
+                data['DI+'] = 20
+                data['DI-'] = 20
         else:
             logger.warning(f"Too few data points ({len(data)}) to calculate any reliable indicators")
             # Create placeholder columns with the same values to avoid calculation errors
@@ -416,9 +495,16 @@ def start(update: Update, context: CallbackContext):
     update.message.reply_text(welcome_message)
 
 # Function to analyze a stock ticker
-def analyze_ticker(ticker, user_id="test_user"):
+def analyze_ticker(ticker, user_id="test_user", timeframe=None):
     try:
-        data = get_stock_data(ticker)
+        # If timeframe is specified, use it, otherwise use default
+        if timeframe and timeframe in TIMEFRAMES:
+            data = get_stock_data(ticker, timeframe=timeframe)
+            timeframe_description = TIMEFRAMES[timeframe]["description"]
+        else:
+            data = get_stock_data(ticker)
+            timeframe = DEFAULT_TIMEFRAME
+            timeframe_description = TIMEFRAMES[DEFAULT_TIMEFRAME]["description"]
         
         # Check if we have valid data
         if data is None or data.empty:
@@ -429,6 +515,10 @@ def analyze_ticker(ticker, user_id="test_user"):
         logger.info(f"Retrieved data for {ticker} with shape: {data.shape}")
         
         try:
+            # Get sentiment analysis for the ticker
+            sentiment_summary, sentiment_data = get_sentiment_analysis(ticker)
+            
+            # Calculate technical indicators
             data = calculate_indicators(data)
             trend = determine_trend(data)
             
@@ -452,8 +542,12 @@ def analyze_ticker(ticker, user_id="test_user"):
                 price_trend_up = last_forecast > current_price
                 price_change_pct = ((last_forecast / current_price) - 1) * 100
             
+            # Add sentiment analysis to the response
+            sentiment_summary, sentiment_data = get_sentiment_analysis(ticker)
+            
             response = (
                 f"Mr. Otmane, here's your analysis for {ticker}:\n\n"
+                f"{sentiment_summary}\n"
                 f"📊 Trend: {trend}\n\n"
                 f"📉 Technical Indicators:\n"
                 f"RSI: {data['RSI'].iloc[-1]:.2f}\n"
@@ -527,21 +621,37 @@ def analyze_ticker(ticker, user_id="test_user"):
 def handle_ticker(update: Update, context: CallbackContext):
     user_id = str(update.message.from_user.id)
     
-    # Extract ticker from the message
+    # Extract ticker and timeframe from the message
+    timeframe = None
+    
     if update.message.text.startswith('/ticker'):
         if not context.args:
             update.message.reply_text("Mr. Otmane, please provide a ticker symbol. Example: /ticker AAPL")
             return
         ticker = context.args[0].upper()
+        
+        # Check if a timeframe was specified
+        if len(context.args) > 1 and context.args[1].lower() in TIMEFRAMES:
+            timeframe = context.args[1].lower()
     else:
-        ticker = update.message.text.upper()
+        # Simple ticker message
+        parts = update.message.text.split()
+        ticker = parts[0].upper()
+        
+        # Check if a timeframe was specified
+        if len(parts) > 1 and parts[1].lower() in TIMEFRAMES:
+            timeframe = parts[1].lower()
     
     # Indicate that analysis is in progress
-    update.message.reply_text(f"Analyzing {ticker}... please wait, Mr. Otmane.")
+    timeframe_text = f" with {TIMEFRAMES[timeframe]['description']}" if timeframe else ""
+    update.message.reply_text(f"Analyzing {ticker}{timeframe_text}... please wait, Mr. Otmane.")
     
     try:
-        # Get stock data
-        data = get_stock_data(ticker)
+        # Get stock data with specified timeframe
+        if timeframe:
+            data = get_stock_data(ticker, timeframe=timeframe)
+        else:
+            data = get_stock_data(ticker)
         
         # Check if we have valid data
         if data is None or data.empty:
@@ -574,11 +684,11 @@ def handle_ticker(update: Update, context: CallbackContext):
             with open(img_path, 'rb') as photo:
                 update.message.reply_photo(
                     photo=photo,
-                    caption=f"Mr. Otmane, here's your technical analysis chart for {ticker}"
+                    caption=f"Mr. Otmane, here's your technical analysis chart for {ticker}{timeframe_text}"
                 )
             
-            # Analyze the ticker - pass the user ID
-            response = analyze_ticker(ticker, user_id)
+            # Analyze the ticker - pass the user ID and timeframe
+            response = analyze_ticker(ticker, user_id, timeframe)
             
             # Send the text analysis after the chart
             update.message.reply_text(response)
@@ -587,7 +697,7 @@ def handle_ticker(update: Update, context: CallbackContext):
             logger.error(f"Error generating chart for {ticker}: {chart_error}")
             
             # If chart fails, still send the text analysis
-            response = analyze_ticker(ticker, user_id)
+            response = analyze_ticker(ticker, user_id, timeframe)
             update.message.reply_text(response)
             update.message.reply_text("Mr. Otmane, I couldn't generate a chart visualization at this time.")
     
@@ -834,6 +944,11 @@ def set_strategy(update: Update, context: CallbackContext):
 
 # Function to display available commands
 def help_command(update: Update, context: CallbackContext):
+    # Create a list of timeframes for the help text
+    timeframe_help = ""
+    for name, details in TIMEFRAMES.items():
+        timeframe_help += f"• {name} - {details['description']}\n"
+    
     help_text = f"""
 *Welcome, Mr. Otmane!*
 
@@ -841,7 +956,11 @@ def help_command(update: Update, context: CallbackContext):
 
 /start - Start the bot and get a welcome message
 /help - Show this help message
-/ticker SYMBOL - Analyze a stock ticker (e.g., /ticker AAPL)
+/ticker SYMBOL [TIMEFRAME] - Analyze a stock ticker (e.g., /ticker AAPL daily)
+
+*Timeframe Options:*
+{timeframe_help}
+Example: AAPL daily - Analyzes Apple stock with daily data
 
 *Watchlist Commands:*
 /add SYMBOL - Add a stock to your watchlist
@@ -856,6 +975,9 @@ def help_command(update: Update, context: CallbackContext):
 *Strategy Commands:*
 /strategies - View all available trading strategies
 /strategy NAME - Set your preferred trading strategy (e.g., /strategy macd)
+
+*Backtest Command:*
+/backtest TICKER STRATEGY START_DATE END_DATE TIMEFRAME - Test a strategy on historical data
 
 You can also just send a ticker symbol directly without the /ticker command.
 
@@ -885,6 +1007,32 @@ This bot analyzes stocks using technical indicators and helps you make informed 
 The bot uses a configurable take profit / stop loss when positions are opened.
     """
     update.message.reply_text(help_text, parse_mode='Markdown')
+
+# Function to set bot commands for the Telegram bot
+def set_bot_commands(updater):
+    """Register commands with Telegram to show in the UI when typing /"""
+    try:
+        from telegram import BotCommand
+        commands = [
+            BotCommand("start", "Start the bot and get a welcome message"),
+            BotCommand("help", "Show help with all available commands"),
+            BotCommand("ticker", "Analyze a stock ticker (e.g., /ticker AAPL)"),
+            BotCommand("add", "Add a stock to your watchlist"),
+            BotCommand("remove", "Remove a stock from your watchlist"),
+            BotCommand("watchlist", "View your current watchlist"),
+            BotCommand("portfolio", "Show your current portfolio and performance"),
+            BotCommand("buy", "Add a stock to your portfolio (e.g., /buy AAPL 150.00 10)"),
+            BotCommand("sell", "Remove a stock from your portfolio"),
+            BotCommand("strategies", "View all available trading strategies"),
+            BotCommand("strategy", "Set your preferred trading strategy")
+        ]
+        
+        updater.bot.set_my_commands(commands)
+        logger.info("Successfully registered commands with Telegram")
+        return True
+    except Exception as cmd_error:
+        logger.error(f"Error registering commands: {cmd_error}")
+        return False
 
 # Main function to run the bot
 def run_telegram_bot():
@@ -934,27 +1082,8 @@ def run_telegram_bot():
         job_queue.run_repeating(send_watchlist_notifications, interval=30, first=30)
         logger.info("Set up automatic notifications job (checking every 30 seconds)")
 
-        # Register commands with Telegram using setMyCommands API
-        from telegram import BotCommand
-        commands = [
-            BotCommand("start", "Start the bot and get a welcome message"),
-            BotCommand("help", "Show help with all available commands"),
-            BotCommand("ticker", "Analyze a stock ticker (e.g., /ticker AAPL)"),
-            BotCommand("add", "Add a stock to your watchlist"),
-            BotCommand("remove", "Remove a stock from your watchlist"),
-            BotCommand("watchlist", "View your current watchlist"),
-            BotCommand("portfolio", "Show your current portfolio and performance"),
-            BotCommand("buy", "Add a stock to your portfolio (e.g., /buy AAPL 150.00 10)"),
-            BotCommand("sell", "Remove a stock from your portfolio"),
-            BotCommand("strategies", "View all available trading strategies"),
-            BotCommand("strategy", "Set your preferred trading strategy")
-        ]
-        
-        try:
-            updater.bot.set_my_commands(commands)
-            logger.info("Successfully registered commands with Telegram")
-        except Exception as cmd_error:
-            logger.error(f"Error registering commands: {cmd_error}")
+        # Set bot commands - this will make commands appear in the Telegram UI when typing /
+        set_bot_commands(updater)
 
         # Start the bot
         print("Starting Telegram bot with token:", token[:5] + "..." + token[-5:])
