@@ -50,3 +50,8 @@ jobs:
           echo "Testing $strategy strategy"
           python -c "import main; main.set_user_strategy('test_user', '$strategy'); print(f'Successfully set strategy to {main.get_user_strategy(\"test_user\")}')"
         done
+        
+    - name: Run backtest test
+      run: |
+        echo "Testing backtesting functionality with AAPL"
+        python test_stock.py backtest AAPL combined 2024-01-01 2024-03-15 1d

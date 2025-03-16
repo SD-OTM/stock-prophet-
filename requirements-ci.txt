@@ -1,7 +1,7 @@
 matplotlib>=3.7.0
 numpy>=1.24.0
 pandas>=2.0.0
-pandas-ta==0.3.13b0
+pandas-ta>=0.3.14b0
 python-telegram-bot>=13.0
 statsmodels>=0.13.0
 telegram>=0.0.1
