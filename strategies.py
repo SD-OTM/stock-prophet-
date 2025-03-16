@@ -5,6 +5,7 @@ Defines different trading strategies with customizable parameters
 
 import logging
 import numpy as np
+import pandas as pd
 
 logger = logging.getLogger(__name__)
 
