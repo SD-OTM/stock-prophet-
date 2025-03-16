@@ -890,6 +890,20 @@ def add_to_watchlist(update: Update, context: CallbackContext):
     
     ticker = context.args[0].upper()
     
+    # Special case for gold spot price
+    gold_spot_tickers = ["XAU", "XAUUSD", "XAUUSD=X"]
+    if ticker in gold_spot_tickers:
+        # Use a consistent internal name for gold spot
+        ticker = "XAUUSD"
+        message_id = f"MSG-{int(time.time())}-ADD"
+        if ticker not in user_watchlists[user_id]:
+            user_watchlists[user_id].append(ticker)
+            save_watchlists()
+            update.message.reply_text(f"ID: {message_id}\nMr. Otmane, I've added Gold Spot (XAU/USD) to your watchlist! You'll receive regular updates on gold price every 30 minutes.")
+        else:
+            update.message.reply_text(f"ID: {message_id}\nMr. Otmane, Gold Spot (XAU/USD) is already in your watchlist.")
+        return
+    
     # Verify if the ticker exists by trying to fetch data
     data = get_stock_data(ticker)
     if data is None or data.empty:
@@ -919,6 +933,21 @@ def remove_from_watchlist(update: Update, context: CallbackContext):
     
     ticker = context.args[0].upper()
     
+    # Handle special case for gold spot price
+    gold_spot_tickers = ["XAU", "XAUUSD", "XAUUSD=X"]
+    if ticker in gold_spot_tickers:
+        # Check if the XAUUSD ticker is in the watchlist
+        if "XAUUSD" in user_watchlists[user_id]:
+            user_watchlists[user_id].remove("XAUUSD")
+            save_watchlists()
+            message_id = f"MSG-{int(time.time())}-REMOVE"
+            update.message.reply_text(f"ID: {message_id}\nMr. Otmane, I've removed Gold Spot (XAU/USD) from your watchlist.", parse_mode='Markdown')
+        else:
+            message_id = f"MSG-{int(time.time())}-NOT-FOUND"
+            update.message.reply_text(f"ID: {message_id}\nMr. Otmane, Gold Spot (XAU/USD) is not in your watchlist.", parse_mode='Markdown')
+        return
+    
+    # Regular ticker handling
     # Remove from watchlist if present
     if ticker in user_watchlists[user_id]:
         user_watchlists[user_id].remove(ticker)
@@ -938,9 +967,13 @@ def show_watchlist(update: Update, context: CallbackContext):
     if user_id in user_watchlists and user_watchlists[user_id]:
         formatted_tickers = []
         for ticker in user_watchlists[user_id]:
-            formatted_tickers.append(f"*{ticker}*")
+            # Special display for gold spot price
+            if ticker == "XAUUSD":
+                formatted_tickers.append("*Gold Spot (XAU/USD)*")
+            else:
+                formatted_tickers.append(f"*{ticker}*")
         tickers_str = ', '.join(formatted_tickers)
-        update.message.reply_text(f"ID: {message_id}\nMr. Otmane, your watchlist: {tickers_str}\n\nYou'll receive automatic forecasts for these stocks every 30 minutes.", parse_mode='Markdown')
+        update.message.reply_text(f"ID: {message_id}\nMr. Otmane, your watchlist: {tickers_str}\n\nYou'll receive automatic updates for these assets every 30 minutes.", parse_mode='Markdown')
     else:
         update.message.reply_text(f"ID: {message_id}\nMr. Otmane, your watchlist is empty. Add stocks with /add TICKER")
 
@@ -957,7 +990,67 @@ def send_watchlist_notifications(context: CallbackContext):
             last_time = last_notification_time[user_id][ticker]
             if now - last_time >= notification_interval:
                 try:
-                    # Get the stock data and analyze it
+                    # Special case for gold spot price
+                    if ticker == "XAUUSD":
+                        # Import functions from gold spot module
+                        from test_gold_spot import get_gold_spot_price, get_gold_stats
+                        
+                        # Get gold price
+                        gold_price = get_gold_spot_price()
+                        
+                        if gold_price:
+                            # Calculate gold investment stats
+                            stats = get_gold_stats(gold_price)
+                            
+                            # Create message ID
+                            message_id = f"MSG-{int(time.time())}-GOLD-SPOT"
+                            
+                            # Create formatted message
+                            gold_response = f"ID: {message_id}\n"
+                            gold_response += f"*Gold Spot Price (XAU/USD) Update*\n\n"
+                            gold_response += f"💰 Current Price: *${gold_price:,.3f} USD* per troy ounce\n\n"
+                            
+                            # Add conversion rates
+                            gold_response += f"*Conversion Rates:*\n"
+                            gold_response += f"• 1 gram: ${stats['price_per_gram']:.2f}\n"
+                            gold_response += f"• 1 kg: ${stats['price_per_kg']:.2f}\n\n"
+                            
+                            # Add trading information
+                            gold_response += f"*Trading Information:*\n"
+                            gold_response += f"• Take profit target (+1.5%): ${gold_price * 1.015:.2f}\n"
+                            gold_response += f"• Stop loss level (-2.0%): ${gold_price * 0.98:.2f}\n\n"
+                            
+                            # Add ETF equivalent for reference
+                            gold_response += f"*Market Equivalents:*\n"
+                            gold_response += f"• GLD ETF equivalent: ~${gold_price/10:.2f} per share\n"
+                            
+                            # Send the message
+                            context.bot.send_message(
+                                chat_id=user_id, 
+                                text=gold_response,
+                                parse_mode='Markdown'
+                            )
+                            
+                            # Update last notification time
+                            last_notification_time[user_id][ticker] = now
+                            logger.info(f"Sent Gold Spot price update to user {user_id}")
+                            
+                            # Check if user has a phone number for SMS gold price alerts
+                            if user_id in user_phone_numbers:
+                                phone_number = user_phone_numbers[user_id]
+                                from sms_notifications import send_gold_price_sms
+                                sms_sent = send_gold_price_sms(
+                                    phone_number, 
+                                    gold_price
+                                )
+                                if sms_sent:
+                                    logger.info(f"Sent SMS gold price update to {user_id}")
+                                else:
+                                    logger.error(f"Failed to send SMS gold price update to {user_id}")
+                            
+                            continue  # Skip the regular stock analysis for gold spot
+                    
+                    # For regular tickers, get the stock data and analyze it
                     data = get_stock_data(ticker)
                     if data is None:
                         continue  # Skip if we can't get data
@@ -1224,6 +1317,55 @@ def set_strategy(update: Update, context: CallbackContext):
         update.message.reply_text(f"ID: {message_id}\nMr. Otmane, sorry, '*{strategy_name}*' is not a valid strategy. Use /strategies to see available options.", parse_mode='Markdown')
 
 # Function to display available commands
+# Function to check gold spot price
+def check_gold_price(update: Update, context: CallbackContext):
+    """Command handler for /gold command to get the current gold spot price"""
+    from test_gold_spot import get_gold_spot_price, get_gold_stats
+    
+    user_id = str(update.message.from_user.id)
+    message_id = f"MSG-{int(time.time())}-GOLD"
+    
+    try:
+        # Send initial message to user
+        update.message.reply_text(f"ID: {message_id}\nMr. Otmane, I'm retrieving the current gold spot price for you...")
+        
+        # Get gold price (will use cached price if available and not expired)
+        gold_price = get_gold_spot_price()
+        
+        if gold_price:
+            # Calculate gold investment stats
+            stats = get_gold_stats(gold_price)
+            
+            # Create formatted message
+            gold_response = f"ID: {message_id}\n"
+            gold_response += f"*Gold Spot Price (XAU/USD)*\n\n"
+            gold_response += f"💰 Current Price: *${gold_price:,.3f} USD* per troy ounce\n\n"
+            
+            # Add conversion rates
+            gold_response += f"*Conversion Rates:*\n"
+            gold_response += f"• 1 gram: ${stats['price_per_gram']:.2f}\n"
+            gold_response += f"• 1 kg: ${stats['price_per_kg']:.2f}\n\n"
+            
+            # Add trading information
+            gold_response += f"*Trading Information:*\n"
+            gold_response += f"• Take profit target (+1.5%): ${gold_price * 1.015:.2f}\n"
+            gold_response += f"• Stop loss level (-2.0%): ${gold_price * 0.98:.2f}\n"
+            gold_response += f"• Gold ETF (GLD) equivalent: ~${gold_price/10:.2f} per share\n\n"
+            
+            # Add additional note
+            gold_response += "For technical analysis, you can use `/ticker GLD` for the Gold ETF."
+            
+            # Send the response
+            update.message.reply_text(gold_response, parse_mode='Markdown')
+            
+            logger.info(f"Sent gold price information to user {user_id}")
+        else:
+            update.message.reply_text(f"ID: {message_id}\nMr. Otmane, I couldn't retrieve the current gold price. Please try again later or check if the Alpha Vantage API key is properly set up.")
+    
+    except Exception as e:
+        logger.error(f"Error checking gold price: {e}")
+        update.message.reply_text(f"ID: {message_id}\nMr. Otmane, I encountered an error while retrieving the gold price: {str(e)}")
+
 # Function to set user's phone number for SMS alerts
 def set_phone_number(update: Update, context: CallbackContext):
     """Command handler for /sms command to set user's phone number for SMS alerts"""
@@ -1296,6 +1438,7 @@ ID: {message_id}
 /start - Start the bot and get a welcome message
 /help - Show this help message
 /ticker SYMBOL [TIMEFRAME] - Analyze a stock ticker (e.g., /ticker AAPL daily)
+/gold - Get current gold spot price (XAU/USD)
 
 *Timeframe Options:*
 {timeframe_help}
@@ -1362,6 +1505,7 @@ def set_bot_commands(updater):
             BotCommand("start", "Start the bot and get a welcome message"),
             BotCommand("help", "Show help with all available commands"),
             BotCommand("ticker", "Analyze a stock ticker (e.g., /ticker AAPL)"),
+            BotCommand("gold", "Get current gold spot price (XAU/USD)"),
             BotCommand("add", "Add a stock to your watchlist"),
             BotCommand("remove", "Remove a stock from your watchlist"),
             BotCommand("watchlist", "View your current watchlist"),
@@ -1381,7 +1525,7 @@ def set_bot_commands(updater):
         return False
 
 # Main function to run the bot
-def run_telegram_bot():
+def run_telegram_bot(is_heroku=False, port=None, url=None):
     try:
         # Check for environment variable first
         import os
@@ -1397,6 +1541,7 @@ def run_telegram_bot():
         load_watchlists()
         load_portfolios()
         load_user_strategies()
+        load_phone_numbers()
             
         updater = Updater(token)
         dispatcher = updater.dispatcher
@@ -1406,6 +1551,9 @@ def run_telegram_bot():
         dispatcher.add_handler(CommandHandler("start", start))
         dispatcher.add_handler(CommandHandler("help", help_command))
         dispatcher.add_handler(CommandHandler("ticker", handle_ticker))
+        
+        # Add gold price command handler
+        dispatcher.add_handler(CommandHandler("gold", check_gold_price))
         
         # Add watchlist command handlers
         dispatcher.add_handler(CommandHandler("add", add_to_watchlist))
@@ -1436,8 +1584,20 @@ def run_telegram_bot():
 
         # Start the bot
         print("Starting Telegram bot with token:", token[:5] + "..." + token[-5:])
-        print("Bot is ready! Try sending it a message or the /start command in Telegram.")
-        updater.start_polling()
+        
+        if is_heroku and url:
+            # Running on Heroku with webhook
+            print(f"Setting up webhook on {url}")
+            updater.start_webhook(listen="0.0.0.0",
+                                 port=int(port),
+                                 url_path=token,
+                                 webhook_url=f"{url}/{token}")
+            print(f"Bot is running on Heroku with webhook mode! URL: {url}")
+        else:
+            # Standard polling mode
+            print("Bot is ready! Try sending it a message or the /start command in Telegram.")
+            updater.start_polling()
+            
         updater.idle()
         return True
     except Exception as e:

@@ -1,0 +1,13 @@
+matplotlib
+numpy
+pandas
+pandas-ta
+python-telegram-bot
+requests
+setuptools
+statsmodels
+telegram
+twilio
+yfinance
+APScheduler
+gunicorn

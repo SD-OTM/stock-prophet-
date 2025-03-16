@@ -47,6 +47,7 @@ Stock Prophet understands the following commands:
 | `/start` | Introduction to the bot | `/start` |
 | `/help` | List all available commands | `/help` |
 | `/ticker SYMBOL` | Analyze a stock | `/ticker AAPL` |
+| `/gold` | Get current gold spot price | `/gold` |
 | `/add SYMBOL` | Add a stock to your watchlist | `/add AAPL` |
 | `/remove SYMBOL` | Remove a stock from your watchlist | `/remove AAPL` |
 | `/watchlist` | View your watchlist | `/watchlist` |
@@ -55,6 +56,7 @@ Stock Prophet understands the following commands:
 | `/portfolio` | View your portfolio | `/portfolio` |
 | `/strategies` | List all available trading strategies | `/strategies` |
 | `/strategy STRATEGY_NAME` | Change your trading strategy | `/strategy combined` |
+| `/sms PHONE_NUMBER` | Set phone number for SMS alerts | `/sms +1234567890` |
 
 ## Analyzing Stocks
 
@@ -210,6 +212,41 @@ Stock Prophet offers multiple trading strategies to generate signals.
 - **Combined Strategy**: Requires confirmation from multiple indicators
 - **Gold Strategy**: Specialized for gold commodities and ETFs with optimized parameters
 
+### Gold Price Command
+
+Stock Prophet provides direct access to current gold spot prices with the `/gold` command:
+
+```
+/gold
+```
+
+The bot will respond with:
+
+1. Current gold spot price (XAU/USD) in USD per troy ounce
+2. Conversion rates (price per gram, price per kg)
+3. Trading levels (take profit and stop loss targets)
+4. Gold ETF equivalent price
+
+Example response:
+```
+Mr. Otmane, here's the current gold spot price:
+
+Gold Spot Price (XAU/USD)
+
+💰 Current Price: $2,984.910 USD per troy ounce
+
+Conversion Rates:
+• 1 gram: $95.98
+• 1 kg: $95964.86
+
+Trading Information:
+• Take profit target (+1.5%): $3029.68
+• Stop loss level (-2.0%): $2925.21
+• Gold ETF (GLD) equivalent: ~$298.49 per share
+
+For technical analysis, you can use /ticker GLD for the Gold ETF.
+```
+
 ### Specialized Gold Trading
 
 Stock Prophet includes a dedicated strategy for gold and precious metals trading:
@@ -302,8 +339,39 @@ Stock Prophet automatically monitors your watchlist and sends alerts for:
 1. Significant price movements
 2. New trading signals
 3. Technical indicator triggers
+4. Gold price updates
 
 Notifications are sent every 30 seconds if conditions are met.
+
+### SMS Notifications
+
+Stock Prophet can send SMS alerts to your mobile phone for important trading signals and price updates:
+
+1. To set up SMS notifications, use the `/sms` command followed by your phone number in international format:
+   ```
+   /sms +1234567890
+   ```
+
+2. After setting up your phone number, you'll receive SMS alerts for:
+   - Trading signals when a BUY or SELL is generated
+   - Significant price movements in your watchlist
+   - Portfolio performance summaries 
+   - Gold price updates and alerts
+
+Example gold price SMS alert:
+```
+GOLD SPOT PRICE UPDATE 📈
+Date: Mar 16, 2025 at 08:30
+
+XAU/USD: $2984.91 per troy ounce
+24h Change: +0.75%
+
+Trading Levels (Gold Strategy):
+Take Profit: $3029.68
+Stop Loss: $2925.21
+
+Mr. Otmane, use these price levels in your gold trading strategy!
+```
 
 ## Troubleshooting
 
@@ -317,6 +385,9 @@ Notifications are sent every 30 seconds if conditions are met.
 
 **Problem**: No trading signals generated
 **Solution**: Try a different strategy or check during market hours
+
+**Problem**: Gold price not updating or showing "Failed to retrieve gold price"
+**Solution**: Check if your Alpha Vantage API key is set up correctly in the environment variables
 
 ## Advanced Usage
 
@@ -333,6 +404,13 @@ python test_stock.py portfolio
 
 # Test backtesting functionality
 python test_stock.py backtest AAPL combined 2024-01-01 2024-03-15 1d
+
+# Test gold spot price
+python test_gold_spot.py
+
+# Test gold-related assets
+python test_stock.py GLD
+python test_stock.py "GC=F"
 ```
 
 ### CI/CD Pipeline

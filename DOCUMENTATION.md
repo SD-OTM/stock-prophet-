@@ -106,6 +106,12 @@ def remove_from_watchlist(update: Update, context: CallbackContext):
     
 def show_watchlist(update: Update, context: CallbackContext):
     """Handle the /watchlist command"""
+    
+def check_gold_price(update: Update, context: CallbackContext):
+    """Handle the /gold command to get the current gold spot price"""
+    
+def set_phone_number(update: Update, context: CallbackContext):
+    """Handle the /sms command to set user's phone number for SMS alerts"""
 ```
 
 These functions handle the various Telegram bot commands, processing user input and providing responses.
@@ -317,11 +323,58 @@ def test_analyze():
 def test_portfolio():
     """Test the portfolio management functionality"""
     
+def test_backtest():
+    """Test the backtesting functionality with a specific ticker"""
+    
 def main():
     """Main test function"""
 ```
 
 These functions allow for easy testing of the application's core functionality without needing the Telegram bot interface.
+
+## Gold Spot Price (test_gold_spot.py)
+
+The gold spot price module provides functionality for fetching and caching gold spot price data.
+
+```python
+def get_gold_spot_price(use_cache=True):
+    """
+    Fetch Gold Spot / U.S. Dollar data using Alpha Vantage API with caching
+    
+    Args:
+        use_cache: Whether to use cached data if available
+        
+    Returns:
+        float: Gold spot price per troy ounce
+    """
+    
+def get_gold_stats(gold_price):
+    """
+    Generate gold investment statistics
+    
+    Args:
+        gold_price: Current gold price per troy ounce
+        
+    Returns:
+        dict: Gold statistics and calculations
+    """
+    
+def get_cached_gold_price():
+    """
+    Get cached gold price if available and not expired
+    Returns: (price, timestamp) tuple or (None, None) if no valid cache
+    """
+    
+def save_to_cache(price):
+    """Save gold price to cache"""
+```
+
+This module provides:
+1. Direct access to gold spot price (XAU/USD) at ~$2,984 per troy ounce
+2. Caching to minimize API calls to Alpha Vantage
+3. Fallback to last known good price if API limits are reached
+4. Conversion rates for grams and kilograms
+5. Integration with the watchlist and SMS notification systems
 
 ## CI/CD Pipeline (GitHub Actions)
 
