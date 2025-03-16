@@ -17,7 +17,10 @@ jobs:
     env:
       ALPHA_VANTAGE_API_KEY: ${{ secrets.ALPHA_VANTAGE_API_KEY }}
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      # We don't set Twilio credentials - this will test the SMS simulation mode
       CI: 'true'  # Mark as CI environment
+      TEST_MODE: 'true'  # Additional flag for test mode
+      GOLD_PRICE: '2984.91'  # Fixed gold price for consistent tests
     
     steps:
     - uses: actions/checkout@v3
@@ -62,6 +65,17 @@ jobs:
         python test_stock.py NVDA
       continue-on-error: true
         
+    - name: Test gold price functionality
+      if: success() || failure()  # Run even if previous step failed
+      run: |
+        echo "Testing Gold ETF (GLD) analysis"
+        python test_stock.py GLD
+        echo "Testing Gold Spot price retrieval"
+        python test_gold_spot.py
+        echo "Testing Gold SMS simulation mode"
+        python test_gold_without_twilio.py --ci
+      continue-on-error: true
+
     - name: Test strategy functionality
       if: success() || failure()  # Run even if previous step failed
       run: |

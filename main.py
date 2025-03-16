@@ -1323,9 +1323,15 @@ def set_strategy(update: Update, context: CallbackContext):
 def check_gold_price(update: Update, context: CallbackContext):
     """Command handler for /gold command to get the current gold spot price"""
     from test_gold_spot import get_gold_spot_price, get_gold_stats
+    import sms_notifications
     
     user_id = str(update.message.from_user.id)
     message_id = f"MSG-{int(time.time())}-GOLD"
+    
+    # Check if user wants to receive SMS notification
+    send_sms = False
+    if context.args and len(context.args) > 0 and context.args[0].lower() == "sms":
+        send_sms = True
     
     try:
         # Send initial message to user
@@ -1357,8 +1363,49 @@ def check_gold_price(update: Update, context: CallbackContext):
             # Add additional note
             gold_response += "For technical analysis, you can use `/ticker GLD` for the Gold ETF."
             
+            # Information about SMS notification
+            if send_sms:
+                gold_response += "\n\n*SMS Notification:* I'll send this information to your phone if you have registered a number."
+            else:
+                gold_response += "\n\n*Tip:* Use `/gold sms` to also receive this information as an SMS."
+            
             # Send the response
             update.message.reply_text(gold_response, parse_mode='Markdown')
+            
+            # Send SMS if requested and phone number is available
+            if send_sms and user_id in user_phone_numbers:
+                phone_number = user_phone_numbers[user_id]
+                gld_etf_price = gold_price / 10  # Approximate price
+                
+                # Check if Twilio is configured
+                if sms_notifications.is_twilio_configured():
+                    # We don't have historical data to calculate price change
+                    # Use 0.0 for now, but this could be enhanced in the future
+                    price_change = 0.0  
+                    
+                    sms_sent = sms_notifications.send_gold_price_sms(
+                        phone_number, 
+                        gold_price, 
+                        gld_etf_price, 
+                        price_change
+                    )
+                    
+                    if sms_sent:
+                        update.message.reply_text(
+                            f"ID: {message_id}-SMS\nMr. Otmane, I've also sent this gold price information to your phone at {phone_number}."
+                        )
+                    else:
+                        update.message.reply_text(
+                            f"ID: {message_id}-SMS-FAIL\nMr. Otmane, I couldn't send the SMS to your phone. Please check your phone number."
+                        )
+                else:
+                    update.message.reply_text(
+                        f"ID: {message_id}-SMS-NOTWILIO\nMr. Otmane, SMS notifications are not available because Twilio is not configured. The feature is ready but requires Twilio credentials to be set up."
+                    )
+            elif send_sms and user_id not in user_phone_numbers:
+                update.message.reply_text(
+                    f"ID: {message_id}-SMS-NOPHONE\nMr. Otmane, you haven't registered a phone number yet. Please use the /sms command to set your phone number first."
+                )
             
             logger.info(f"Sent gold price information to user {user_id}")
         else:
