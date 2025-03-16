@@ -8,7 +8,7 @@ setup(
         "matplotlib",
         "numpy",
         "pandas",
-        "pandas-ta",
+        "pandas-ta>=0.3.14b0",
         "python-telegram-bot",
         "statsmodels",
         "telegram",
