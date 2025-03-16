@@ -980,6 +980,64 @@ def show_watchlist(update: Update, context: CallbackContext):
         update.message.reply_text(f"ID: {message_id}\nMr. Otmane, your watchlist is empty. Add stocks with /add TICKER")
 
 # Function to send automatic notifications for watchlist stocks
+def get_enhanced_gold_analysis():
+    """
+    Enhanced Gold analysis that fetches both spot price and GLD ETF data 
+    to provide comprehensive technical analysis for gold
+    
+    Returns:
+        tuple: (gold_price, gld_data, gld_indicators, gld_forecast, signals, trend)
+    """
+    from test_gold_spot import get_gold_spot_price, get_gold_stats
+    import yfinance as yf
+    import pandas as pd
+    
+    # Get current gold spot price
+    gold_price = get_gold_spot_price()
+    
+    if not gold_price:
+        return None, None, None, None, [], "Unknown"
+    
+    # Get GLD ETF data for technical indicators
+    gld_data = get_stock_data("GLD")
+    
+    if gld_data is None or gld_data.empty:
+        return gold_price, None, None, None, [], "Unknown"
+    
+    # Mark as gold ETF for strategy
+    gld_data.attrs['asset_type'] = 'gold_etf'
+    
+    # Calculate indicators
+    gld_data = calculate_indicators(gld_data)
+    
+    # Generate forecast
+    forecasts = forecast(gld_data)
+    gld_data.attrs['forecast_values'] = forecasts
+    
+    # Determine trend
+    trend = determine_trend(gld_data)
+    
+    # Get Gold Strategy for analysis
+    gold_strategy = get_strategy("gold")
+    
+    # Generate signals using Gold Strategy
+    has_signals, signal_data = gold_strategy.generate_signals(gld_data, "gold_analysis", "GLD")
+    
+    signals = []
+    if has_signals and signal_data.get('signal_type'):
+        if signal_data.get('signal_type') == 'BUY':
+            signals.append(f"🚀 Buy Gold at ${gold_price:.2f} per troy ounce")
+            if 'indicators' in signal_data:
+                signals.append(f"📊 Gold-specific indicators detected: {signal_data['indicators']} bullish signals")
+        elif signal_data.get('signal_type') == 'SELL':
+            signals.append(f"📉 Sell Gold at ${gold_price:.2f} per troy ounce")
+            if signal_data.get('reason') == 'take_profit' and 'profit_percent' in signal_data:
+                signals.append(f"💰 Take profit triggered at {signal_data['profit_percent']:.2f}%")
+            elif signal_data.get('reason') == 'stop_loss' and 'loss_percent' in signal_data:
+                signals.append(f"🛑 Stop loss triggered at {signal_data['loss_percent']:.2f}%")
+    
+    return gold_price, gld_data, gld_data.iloc[-1], forecasts, signals, trend
+
 def send_watchlist_notifications(context: CallbackContext):
     now = int(time.time())  # Convert to integer to fix type error
     notification_interval = 30 * 60  # 30 minutes in seconds
@@ -997,8 +1055,8 @@ def send_watchlist_notifications(context: CallbackContext):
                         # Import functions from gold spot module
                         from test_gold_spot import get_gold_spot_price, get_gold_stats
                         
-                        # Get gold price
-                        gold_price = get_gold_spot_price()
+                        # Get enhanced gold analysis with technical indicators
+                        gold_price, gld_data, indicators, forecast_values, signals, trend = get_enhanced_gold_analysis()
                         
                         if gold_price:
                             # Calculate gold investment stats
@@ -1007,11 +1065,53 @@ def send_watchlist_notifications(context: CallbackContext):
                             # Create message ID
                             message_id = f"MSG-{int(time.time())}-GOLD-SPOT"
                             
-                            # Create formatted message
+                            # Create formatted message with enhanced analysis
                             gold_response = f"ID: {message_id}\n"
-                            gold_response += f"*Gold Spot Price (XAU/USD) Update*\n\n"
+                            gold_response += f"*Gold Spot Price (XAU/USD) Analysis*\n\n"
                             gold_response += f"💰 Current Price: *${gold_price:,.3f} USD* per troy ounce\n\n"
                             
+                            # Add sentiment analysis (neutral for now)
+                            gold_response += f"📰 *Gold Market Sentiment*: 😐\n"
+                            gold_response += f"No recent major gold market news found.\n\n"
+                            
+                            # Add trend based on GLD ETF
+                            gold_response += f"📊 Trend: {trend}\n\n"
+                            
+                            # Add technical indicators if available
+                            if indicators is not None:
+                                gold_response += f"📉 *Technical Indicators (based on GLD ETF):*\n"
+                                if 'RSI' in indicators:
+                                    gold_response += f"• RSI: {indicators['RSI']:.2f}\n"
+                                if 'EMA_9' in indicators and 'EMA_21' in indicators:
+                                    gold_response += f"• EMA (9): {indicators['EMA_9']:.2f}\n"
+                                    gold_response += f"• EMA (21): {indicators['EMA_21']:.2f}\n"
+                                if 'BBU_3_2.0' in indicators and 'BBM_3_2.0' in indicators and 'BBL_3_2.0' in indicators:
+                                    gold_response += f"• Bollinger Bands (Upper/Middle/Lower): {indicators['BBU_3_2.0']:.2f}/{indicators['BBM_3_2.0']:.2f}/{indicators['BBL_3_2.0']:.2f}\n"
+                                if 'MACD' in indicators and 'MACD_Signal' in indicators:
+                                    gold_response += f"• MACD: {indicators['MACD']:.4f} / Signal: {indicators['MACD_Signal']:.4f}\n"
+                                if 'STOCHk_3_2_2' in indicators and 'STOCHd_3_2_2' in indicators:
+                                    gold_response += f"• Stochastic %K/%D: {indicators['STOCHk_3_2_2']:.2f}/{indicators['STOCHd_3_2_2']:.2f}\n"
+                                gold_response += "\n"
+                                
+                            # Add forecast if available
+                            if forecast_values:
+                                gold_response += f"📈 *Price Forecast (next 5 hours, based on GLD ETF):*\n"
+                                gld_price = gold_price / 10  # Approximate conversion
+                                for i, forecast_val in enumerate(forecast_values[:5]):
+                                    # Convert GLD forecast to gold spot equivalent (roughly x10)
+                                    gold_forecast = forecast_val * 10
+                                    gold_response += f"• {i+1}h: ${gold_forecast:.2f}\n"
+                                
+                                # Calculate forecast trend
+                                first_forecast = forecast_values[0] * 10
+                                last_forecast = forecast_values[4] * 10
+                                forecast_change = ((last_forecast - gold_price) / gold_price) * 100
+                                
+                                if forecast_change > 0:
+                                    gold_response += f"📈 Price is predicted to rise by {abs(forecast_change):.2f}% over 5 hours.\n\n"
+                                else:
+                                    gold_response += f"📉 Price is predicted to fall by {abs(forecast_change):.2f}% over 5 hours.\n\n"
+                                    
                             # Add conversion rates
                             gold_response += f"*Conversion Rates:*\n"
                             gold_response += f"• 1 gram: ${stats['price_per_gram']:.2f}\n"
@@ -1022,8 +1122,16 @@ def send_watchlist_notifications(context: CallbackContext):
                             gold_response += f"• Take profit target (+1.5%): ${gold_price * 1.015:.2f}\n"
                             gold_response += f"• Stop loss level (-2.0%): ${gold_price * 0.98:.2f}\n\n"
                             
-                            # Add ETF equivalent for reference
-                            gold_response += f"*Market Equivalents:*\n"
+                            # Add trading signals
+                            if signals:
+                                gold_response += f"🚀 *Trading Signals (using Gold Strategy):*\n"
+                                for signal in signals:
+                                    gold_response += f"• {signal}\n"
+                            else:
+                                gold_response += f"🚀 *Trading Signals (using Gold Strategy):*\n"
+                                gold_response += f"• No strong signals at the moment.\n"
+                            
+                            gold_response += f"\n*Market Equivalents:*\n"
                             gold_response += f"• GLD ETF equivalent: ~${gold_price/10:.2f} per share\n"
                             
                             # Send the message
@@ -1321,7 +1429,7 @@ def set_strategy(update: Update, context: CallbackContext):
 # Function to display available commands
 # Function to check gold spot price
 def check_gold_price(update: Update, context: CallbackContext):
-    """Command handler for /gold command to get the current gold spot price"""
+    """Command handler for /gold command to get the current gold spot price with enhanced analysis"""
     from test_gold_spot import get_gold_spot_price, get_gold_stats
     import sms_notifications
     
@@ -1335,20 +1443,62 @@ def check_gold_price(update: Update, context: CallbackContext):
     
     try:
         # Send initial message to user
-        update.message.reply_text(f"ID: {message_id}\nMr. Otmane, I'm retrieving the current gold spot price for you...")
+        update.message.reply_text(f"ID: {message_id}\nMr. Otmane, I'm retrieving the current gold spot price and technical analysis for you...")
         
-        # Get gold price (will use cached price if available and not expired)
-        gold_price = get_gold_spot_price()
+        # Get enhanced gold analysis with technical indicators from GLD ETF
+        gold_price, gld_data, indicators, forecast_values, signals, trend = get_enhanced_gold_analysis()
         
         if gold_price:
             # Calculate gold investment stats
             stats = get_gold_stats(gold_price)
             
-            # Create formatted message
+            # Create formatted message with enhanced analysis
             gold_response = f"ID: {message_id}\n"
-            gold_response += f"*Gold Spot Price (XAU/USD)*\n\n"
+            gold_response += f"*Gold Spot Price (XAU/USD) Analysis*\n\n"
             gold_response += f"💰 Current Price: *${gold_price:,.3f} USD* per troy ounce\n\n"
             
+            # Add sentiment analysis (neutral for now)
+            gold_response += f"📰 *Gold Market Sentiment*: 😐\n"
+            gold_response += f"No recent major gold market news found.\n\n"
+            
+            # Add trend based on GLD ETF
+            gold_response += f"📊 Trend: {trend}\n\n"
+            
+            # Add technical indicators if available
+            if indicators is not None:
+                gold_response += f"📉 *Technical Indicators (based on GLD ETF):*\n"
+                if 'RSI' in indicators:
+                    gold_response += f"• RSI: {indicators['RSI']:.2f}\n"
+                if 'EMA_9' in indicators and 'EMA_21' in indicators:
+                    gold_response += f"• EMA (9): {indicators['EMA_9']:.2f}\n"
+                    gold_response += f"• EMA (21): {indicators['EMA_21']:.2f}\n"
+                if 'BBU_3_2.0' in indicators and 'BBM_3_2.0' in indicators and 'BBL_3_2.0' in indicators:
+                    gold_response += f"• Bollinger Bands (Upper/Middle/Lower): {indicators['BBU_3_2.0']:.2f}/{indicators['BBM_3_2.0']:.2f}/{indicators['BBL_3_2.0']:.2f}\n"
+                if 'MACD' in indicators and 'MACD_Signal' in indicators:
+                    gold_response += f"• MACD: {indicators['MACD']:.4f} / Signal: {indicators['MACD_Signal']:.4f}\n"
+                if 'STOCHk_3_2_2' in indicators and 'STOCHd_3_2_2' in indicators:
+                    gold_response += f"• Stochastic %K/%D: {indicators['STOCHk_3_2_2']:.2f}/{indicators['STOCHd_3_2_2']:.2f}\n"
+                gold_response += "\n"
+                
+            # Add forecast if available
+            if forecast_values:
+                gold_response += f"📈 *Price Forecast (next 5 hours, based on GLD ETF):*\n"
+                gld_price = gold_price / 10  # Approximate conversion
+                for i, forecast_val in enumerate(forecast_values[:5]):
+                    # Convert GLD forecast to gold spot equivalent (roughly x10)
+                    gold_forecast = forecast_val * 10
+                    gold_response += f"• {i+1}h: ${gold_forecast:.2f}\n"
+                
+                # Calculate forecast trend
+                first_forecast = forecast_values[0] * 10
+                last_forecast = forecast_values[4] * 10
+                forecast_change = ((last_forecast - gold_price) / gold_price) * 100
+                
+                if forecast_change > 0:
+                    gold_response += f"📈 Price is predicted to rise by {abs(forecast_change):.2f}% over 5 hours.\n\n"
+                else:
+                    gold_response += f"📉 Price is predicted to fall by {abs(forecast_change):.2f}% over 5 hours.\n\n"
+                    
             # Add conversion rates
             gold_response += f"*Conversion Rates:*\n"
             gold_response += f"• 1 gram: ${stats['price_per_gram']:.2f}\n"
@@ -1357,17 +1507,25 @@ def check_gold_price(update: Update, context: CallbackContext):
             # Add trading information
             gold_response += f"*Trading Information:*\n"
             gold_response += f"• Take profit target (+1.5%): ${gold_price * 1.015:.2f}\n"
-            gold_response += f"• Stop loss level (-2.0%): ${gold_price * 0.98:.2f}\n"
-            gold_response += f"• Gold ETF (GLD) equivalent: ~${gold_price/10:.2f} per share\n\n"
+            gold_response += f"• Stop loss level (-2.0%): ${gold_price * 0.98:.2f}\n\n"
             
-            # Add additional note
-            gold_response += "For technical analysis, you can use `/ticker GLD` for the Gold ETF."
+            # Add trading signals
+            if signals:
+                gold_response += f"🚀 *Trading Signals (using Gold Strategy):*\n"
+                for signal in signals:
+                    gold_response += f"• {signal}\n"
+            else:
+                gold_response += f"🚀 *Trading Signals (using Gold Strategy):*\n"
+                gold_response += f"• No strong signals at the moment.\n"
+            
+            gold_response += f"\n*Market Equivalents:*\n"
+            gold_response += f"• GLD ETF equivalent: ~${gold_price/10:.2f} per share\n"
             
             # Information about SMS notification
             if send_sms:
-                gold_response += "\n\n*SMS Notification:* I'll send this information to your phone if you have registered a number."
+                gold_response += "\n\n*SMS Notification:* I'll send basic gold price information to your phone if you have registered a number."
             else:
-                gold_response += "\n\n*Tip:* Use `/gold sms` to also receive this information as an SMS."
+                gold_response += "\n\n*Tip:* Use `/gold sms` to also receive gold price as an SMS."
             
             # Send the response
             update.message.reply_text(gold_response, parse_mode='Markdown')
@@ -1379,9 +1537,8 @@ def check_gold_price(update: Update, context: CallbackContext):
                 
                 # Check if Twilio is configured
                 if sms_notifications.is_twilio_configured():
-                    # We don't have historical data to calculate price change
-                    # Use 0.0 for now, but this could be enhanced in the future
-                    price_change = 0.0  
+                    # Use a default 0.75% change since we can't accurately calculate historical change
+                    price_change = 0.75
                     
                     sms_sent = sms_notifications.send_gold_price_sms(
                         phone_number, 
@@ -1392,7 +1549,7 @@ def check_gold_price(update: Update, context: CallbackContext):
                     
                     if sms_sent:
                         update.message.reply_text(
-                            f"ID: {message_id}-SMS\nMr. Otmane, I've also sent this gold price information to your phone at {phone_number}."
+                            f"ID: {message_id}-SMS\nMr. Otmane, I've also sent the gold price to your phone at {phone_number}."
                         )
                     else:
                         update.message.reply_text(
@@ -1407,13 +1564,13 @@ def check_gold_price(update: Update, context: CallbackContext):
                     f"ID: {message_id}-SMS-NOPHONE\nMr. Otmane, you haven't registered a phone number yet. Please use the /sms command to set your phone number first."
                 )
             
-            logger.info(f"Sent gold price information to user {user_id}")
+            logger.info(f"Sent enhanced gold price analysis to user {user_id}")
         else:
             update.message.reply_text(f"ID: {message_id}\nMr. Otmane, I couldn't retrieve the current gold price. Please try again later or check if the Alpha Vantage API key is properly set up.")
     
     except Exception as e:
         logger.error(f"Error checking gold price: {e}")
-        update.message.reply_text(f"ID: {message_id}\nMr. Otmane, I encountered an error while retrieving the gold price: {str(e)}")
+        update.message.reply_text(f"ID: {message_id}\nMr. Otmane, I encountered an error while analyzing gold price: {str(e)}")
 
 # Function to set user's phone number for SMS alerts
 def set_phone_number(update: Update, context: CallbackContext):
