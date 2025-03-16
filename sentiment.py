@@ -19,6 +19,9 @@ logger = logging.getLogger(__name__)
 # Alpha Vantage API for News Sentiment
 ALPHA_VANTAGE_API_KEY = os.environ.get("ALPHA_VANTAGE_API_KEY", "")
 
+# Check if running in CI environment
+CI_ENV = os.environ.get('CI') == 'true'
+
 # Sentiment score ranges
 SENTIMENT_RANGES = {
     "Very Negative": (-1.0, -0.6),
@@ -43,6 +46,11 @@ class SentimentAnalysis:
         Returns:
             Dictionary with sentiment data including scores and news items
         """
+        # In CI environment, always return neutral sentiment to avoid API issues
+        if CI_ENV:
+            logger.info("Running in CI environment, skipping actual API call")
+            return {"sentiment_score": 0, "sentiment_label": "Neutral", "news_count": 0, "news_items": []}
+            
         if not ALPHA_VANTAGE_API_KEY:
             logger.warning("Alpha Vantage API key not set. Cannot retrieve news sentiment.")
             return {"sentiment_score": 0, "sentiment_label": "Neutral", "news_count": 0, "news_items": []}

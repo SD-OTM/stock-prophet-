@@ -1,187 +1,69 @@
-# Viewing GitHub Actions Logs: A Visual Guide
+# GitHub Actions Guide for Stock Prophet
 
-This guide demonstrates how to view the logs for your GitHub Actions CI/CD pipeline.
+This guide explains how the CI/CD pipeline works for the Stock Prophet application using GitHub Actions.
 
-## Step 1: Navigate to your GitHub repository
+## Overview
 
-Go to your GitHub repository in a web browser.
+The Stock Prophet CI/CD pipeline automatically tests the application whenever code is pushed to the main branch, a pull request is created, or on a scheduled basis (every weekday at midnight).
 
-```
-   https://github.com/[your-username]/stock-prophet
-   
-   +-------------------------------+
-   |  GitHub - Stock Prophet       |
-   +-------------------------------+
-   |  Code  Issues  Pull Requests  |
-   |  Actions  Projects  Wiki      |
-   |                               |
-   |  <your code will be here>     |
-   |                               |
-   +-------------------------------+
-```
+## What's Being Tested
 
-## Step 2: Access the Actions tab
+The pipeline tests the following aspects of the application:
 
-Click on the "Actions" tab at the top of the repository page.
+1. **Stock Analysis** - Tests the core analysis functionality on multiple stocks (AAPL, NVDA)
+2. **Portfolio Management** - Tests adding, viewing, and removing stocks from a portfolio
+3. **Strategy Functions** - Tests all available trading strategies (RSI, Bollinger Bands, MACD, Combined)
+4. **Backtesting** - Tests the backtesting functionality on historical data
 
-```
-   +-------------------------------+
-   |  GitHub - Stock Prophet       |
-   +-------------------------------+
-   |  Code  Issues  Pull Requests  |
-----> Actions  Projects  Wiki      |
-   |                               |
-   +-------------------------------+
-```
+## CI Optimizations
 
-## Step 3: View workflow runs
+The pipeline includes several optimizations for running in a CI environment:
 
-You'll see a list of all workflow runs, with the most recent at the top.
+1. **API Call Skipping** - In CI mode, the application skips actual API calls to Alpha Vantage to avoid hitting rate limits
+2. **Chart Generation** - Chart generation is simplified or skipped in CI mode to improve performance
+3. **Error Handling** - Tests continue even if individual steps fail, with failures logged
+4. **Date Range Adjustments** - Shorter date ranges are used for backtesting in CI mode
+5. **Synthetic Test Data** - The watchlist is pre-populated with test data to ensure notification tests work
 
-```
-   +-------------------------------+
-   |  Actions - Stock Prophet      |
-   +-------------------------------+
-   |  All workflows  ▼             |
-   |                               |
-   |  ✅ Stock Prophet Tests       |
-   |  3 minutes ago · main         |
-   |                               |
-   |  ✅ Stock Prophet Tests       |
-   |  2 hours ago · main           |
-   |                               |
-   |  ❌ Stock Prophet Tests       |
-   |  Yesterday · pull/42          |
-   |                               |
-   +-------------------------------+
-```
+## How CI Detection Works
 
-## Step 4: Select a workflow run
+The application detects when it's running in a CI environment through:
 
-Click on a workflow run to view its details.
+1. The `CI=true` environment variable set in the GitHub Actions workflow
+2. Each module checks for this variable and adjusts its behavior accordingly
 
-```
-   +-------------------------------+
-   |  Run - Stock Prophet Tests    |
-   +-------------------------------+
-   |  ✅ Stock Prophet Tests       |
-   |  3 minutes ago · main         |
-   |                               |
-   |  ✅ test (3m 24s)             |
-   |                               |
-   |  Summary  Jobs  Artifacts     |
-   +-------------------------------+
+## Setup Process
+
+When the CI pipeline runs, these steps occur:
+
+1. Python 3.11 is set up and dependencies are installed from `requirements-ci.txt`
+2. The `github_setup.sh` script creates necessary directories and test data
+3. All tests run in sequence, with failures logged but not stopping the pipeline
+4. Test results are reported in the workflow logs
+
+## Environment Variables
+
+The following environment variables are used in the CI pipeline:
+
+- `CI=true` - Marks the environment as CI
+- `ALPHA_VANTAGE_API_KEY` - API key for Alpha Vantage (stored in GitHub Secrets)
+- `TELEGRAM_BOT_TOKEN` - Telegram bot token (stored in GitHub Secrets)
+
+## Adding New Tests
+
+When adding new functionality to the application:
+
+1. Ensure it has a CI-aware mode that doesn't rely on external APIs or slow operations
+2. Add appropriate tests to `test_stock.py`
+3. Update the GitHub Actions workflow if needed (`.github/workflows/stock-prophet-tests.yml`)
+
+## Running Tests Locally in CI Mode
+
+You can simulate the CI environment locally by setting the CI environment variable:
+
+```bash
+CI=true bash github_setup.sh
+CI=true python test_stock.py
 ```
 
-## Step 5: View job details
-
-Click on a job (like "test") to expand it and see the steps.
-
-```
-   +-------------------------------+
-   |  Job - test                   |
-   +-------------------------------+
-   |  ✅ Set up job (14s)          |
-   |  ✅ Checkout repository (5s)  |
-   |  ✅ Set up Python (8s)        |
-   |  ✅ Install dependencies (45s)|
-   |  ✅ Run stock analysis tests  |
-   |     (1m 32s)                  |
-   |  ✅ Run portfolio test (18s)  |
-   |  ✅ Test strategy             |
-   |     functionality (22s)       |
-   +-------------------------------+
-```
-
-## Step 6: View step logs
-
-Click on any step to view its detailed logs.
-
-```
-   +-------------------------------+
-   |  Run stock analysis tests     |
-   +-------------------------------+
-   |  Testing Apple stock analysis |
-   |  Analyzing stock: AAPL        |
-   |  2025-03-16 05:16:49,354 -    |
-   |  main - INFO - Fetching data  |
-   |  for AAPL with period=1d,     |
-   |  interval=1h                  |
-   |  ...                          |
-   |                               |
-   |  Testing Tesla stock analysis |
-   |  Analyzing stock: TSLA        |
-   |  ...                          |
-   |                               |
-   |  Testing NVIDIA stock analysis|
-   |  Analyzing stock: NVDA        |
-   |  ...                          |
-   +-------------------------------+
-```
-
-## Step 7: Download complete logs (optional)
-
-You can download the complete logs by clicking the three dots (⋮) and selecting "Download log".
-
-```
-   +-------------------------------+
-   |  Run stock analysis tests     |
-   +-------------------------------+
-   |  ⋮ ▼                          |
-   |  |---------------|            |
-   |  | Download log  |            |
-   |  |---------------|            |
-   |                               |
-   |  Testing Apple stock analysis |
-   |  ...                          |
-   +-------------------------------+
-```
-
-## Understanding the Logs
-
-The logs provide valuable information about your CI/CD pipeline:
-
-1. **Environment Setup**: Information about the Python environment and installed dependencies
-2. **Test Execution**: Output of each test run for different stocks
-3. **Errors and Warnings**: Any issues encountered during testing
-4. **Performance Metrics**: Time taken for each step
-5. **Overall Status**: Success or failure of the workflow
-
-## Troubleshooting Common Issues
-
-### Workflow Failures
-
-If your workflow fails, look for error messages in red in the logs:
-
-```
-   +-------------------------------+
-   |  Run stock analysis tests     |
-   +-------------------------------+
-   |  Testing Apple stock analysis |
-   |  Analyzing stock: AAPL        |
-   |                               |
-   |  ❌ Error: ImportError: No     |
-   |  module named 'yfinance'      |
-   |                               |
-   |  Command failed with exit     |
-   |  code 1                       |
-   +-------------------------------+
-```
-
-### Missing Secrets
-
-If your workflow needs access to secrets (like TELEGRAM_BOT_TOKEN), ensure they're properly set up in your repository settings.
-
-### API Rate Limits
-
-Yahoo Finance and other APIs may have rate limits. If you see errors related to this, you might need to add delays between API calls or use authentication.
-
-## Automated Notifications
-
-You can set up notifications for workflow status:
-
-1. Go to your GitHub profile settings
-2. Navigate to "Notifications"
-3. Under "GitHub Actions", choose your preferred notification method
-
-With these settings, you'll receive alerts when workflows fail, helping you respond quickly to issues.
+This is useful for debugging CI-related issues before pushing to GitHub.

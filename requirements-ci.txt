@@ -1,10 +1,19 @@
-matplotlib>=3.7.0
-numpy>=1.24.0
+# CI requirements for Stock Prophet
+# Reduced dependencies for faster CI testing
+
+# Core dependencies
+yfinance>=0.2.18
 pandas>=2.0.0
-pandas-ta>=0.3.14b0
-python-telegram-bot>=13.0
-statsmodels>=0.13.0
-telegram>=0.0.1
-twilio>=7.0.0
-yfinance>=0.2.0
-requests>=2.25.0
+numpy>=1.24.0
+matplotlib>=3.7.1
+statsmodels>=0.14.0
+
+# Technical analysis
+pandas-ta>=0.3.14b
+
+# For mocking in CI
+unittest.mock
+responses>=0.23.0 
+
+# For specific CI testing needs
+pytest>=7.3.1
