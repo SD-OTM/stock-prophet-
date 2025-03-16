@@ -1,6 +1,6 @@
 import yfinance as yf
 import pandas_ta as ta
-from telegram import Update
+from telegram import Update, InputFile, ReplyKeyboardMarkup, ReplyKeyboardRemove, KeyboardButton
 from telegram.ext import Updater, CommandHandler, CallbackContext, MessageHandler, Filters, ConversationHandler
 import logging
 import os
@@ -10,6 +10,16 @@ import json
 from datetime import datetime
 from collections import defaultdict
 from statsmodels.tsa.arima.model import ARIMA
+import numpy as np
+import io
+import base64
+from PIL import Image
+
+# Import visualization module
+from visualization import generate_chart, save_chart
+
+# Import strategies module
+from strategies import get_strategy, update_strategy_params, get_available_strategies_info, AVAILABLE_STRATEGIES
 
 # Enable logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -278,101 +288,142 @@ def determine_trend(data):
     # Default case
     return "Sideways/Neutral"
 
-# Function to forecast the next 5 hours
+# Function to forecast the next 5 hours with enhanced accuracy
 def forecast(data, steps=5):
     try:
-        # Fit an ARIMA model to the closing prices
-        model = ARIMA(data['Close'], order=(1, 1, 1))  # ARIMA(1,1,1) model
+        # Determine the best ARIMA parameters based on data characteristics
+        from statsmodels.tsa.stattools import adfuller
+        from statsmodels.tsa.arima.model import ARIMA
+        import numpy as np
+        
+        # Check for stationarity using Augmented Dickey-Fuller test
+        result = adfuller(data['Close'].dropna())
+        p_value = result[1]
+        
+        # Determine differencing parameter (d)
+        if p_value < 0.05:
+            # Already stationary
+            d = 0
+        else:
+            # Need to difference
+            d = 1
+            
+        # Determine autoregressive parameter (p) using simple autocorrelation estimation
+        # More complex would be to use ACF and PACF plots, but this gives a reasonable estimate
+        if len(data) > 20:
+            # Compare correlation between original and lag
+            orig = data['Close'][5:].values
+            lagged = data['Close'][:-5].values
+            correlation = np.corrcoef(orig, lagged)[0, 1]
+            
+            if abs(correlation) > 0.7:
+                p = 2  # Strong autocorrelation, use higher order
+            else:
+                p = 1  # Weaker autocorrelation, use lower order
+        else:
+            p = 1  # Default for short series
+            
+        # Moving average component (q)
+        q = 1  # Default
+        
+        logger.info(f"Using optimized ARIMA({p},{d},{q}) model for forecasting")
+        
+        # Fit the ARIMA model with optimized parameters
+        model = ARIMA(data['Close'], order=(p, d, q))
         model_fit = model.fit()
+        
         # Forecast the next 'steps' hours
         forecast_values = model_fit.forecast(steps=steps)
-        return forecast_values.tolist()  # Convert to a list for easier formatting
+        forecast_list = forecast_values.tolist()
+        
+        # Simple forecast result with just the values
+        return forecast_list
     except Exception as e:
-        logger.error(f"Forecasting error: {e}")
-        return None  # Return None if forecasting fails
+        logger.error(f"Enhanced forecasting error: {e}")
+        # Fallback to simple forecasting if enhanced method fails
+        try:
+            # Simple ARIMA(1,1,1) model as fallback
+            model = ARIMA(data['Close'], order=(1, 1, 1))
+            model_fit = model.fit()
+            forecast_values = model_fit.forecast(steps=steps)
+            return forecast_values.tolist()
+        except Exception as e2:
+            logger.error(f"Fallback forecasting error: {e2}")
+            return None  # Return None if all forecasting fails
 
-# Function to generate entry/exit signals
+# Dictionary to store user strategies - user_id -> strategy_name
+user_strategies = defaultdict(lambda: "combined")  # Default to combined strategy
+
+# File to persist user strategies
+STRATEGIES_FILE = "user_strategies.json"
+
+# Function to load user strategies from file
+def load_user_strategies():
+    global user_strategies
+    try:
+        if os.path.exists(STRATEGIES_FILE):
+            with open(STRATEGIES_FILE, 'r') as f:
+                strategies = json.load(f)
+                # Convert from regular dict to defaultdict
+                user_strategies = defaultdict(lambda: "combined")
+                for user_id, strategy in strategies.items():
+                    user_strategies[user_id] = strategy
+            logger.info(f"Loaded strategies for {len(user_strategies)} users")
+    except Exception as e:
+        logger.error(f"Error loading user strategies: {e}")
+
+# Function to save user strategies to file
+def save_user_strategies():
+    try:
+        with open(STRATEGIES_FILE, 'w') as f:
+            # Convert defaultdict to regular dict for JSON serialization
+            json.dump(dict(user_strategies), f)
+        logger.info(f"Saved strategies preferences")
+    except Exception as e:
+        logger.error(f"Error saving user strategies: {e}")
+
+# Function to generate entry/exit signals using selected strategy
 def generate_signals(data, user_id, ticker):
-    latest = data.iloc[-1]
-    signals = []
+    # Get the user's preferred strategy
+    strategy_name = user_strategies[user_id]
+    strategy = get_strategy(strategy_name)
     
-    # Check if we have a complete dataset with all indicators
-    has_macd = all(col in data.columns for col in ['MACD', 'MACD_Signal', 'MACD_Hist'])
-    has_stoch = all(col in data.columns for col in ['Stoch_K', 'Stoch_D'])
-    has_adx = all(col in data.columns for col in ['ADX', 'DI+', 'DI-'])
-    has_ema_long = all(col in data.columns for col in ['EMA_50', 'EMA_200'])
-
-    # Check if the user has an open position for this ticker
-    if user_id in user_data and ticker in user_data[user_id]:
-        buying_price = user_data[user_id][ticker]
-        
-        # Sell Signal (Take Profit or Stop Loss)
-        if (latest['Close'] >= buying_price * 1.02) or (latest['Close'] <= buying_price * 0.98):  # 2% profit or 2% loss
-            signals.append(f"📉 Sell {ticker} at {latest['Close']:.2f} (Take profit or stop loss triggered).")
-            del user_data[user_id][ticker]  # Close the position
-        
-        # Additional sell signals based on technical indicators
-        elif latest['RSI'] > 70:  # Overbought
-            signals.append(f"📉 Consider selling {ticker} at {latest['Close']:.2f} (RSI indicates overbought conditions).")
-        
-        elif has_macd and latest['MACD'] < latest['MACD_Signal'] and latest['MACD_Hist'] < 0:  # MACD bearish crossover
-            signals.append(f"📉 Consider selling {ticker} at {latest['Close']:.2f} (MACD bearish crossover).")
-        
-        elif has_stoch and latest['Stoch_K'] > 80 and latest['Stoch_D'] > 80:  # Stochastic overbought
-            signals.append(f"📉 Consider selling {ticker} at {latest['Close']:.2f} (Stochastic indicates overbought conditions).")
+    # Log the strategy being used
+    logger.info(f"Using {strategy.name} for user {user_id} on ticker {ticker}")
     
-    else:
-        # Original buy signal
-        rsi_oversold = latest['RSI'] < 30
-        price_above_bb_lower = latest['Close'] > latest['BB_lower']
-        short_term_uptrend = latest['EMA_9'] > latest['EMA_21']
-        
-        # Additional buy signals
-        golden_cross = has_ema_long and latest['EMA_50'] > latest['EMA_200']
-        macd_bullish = has_macd and latest['MACD'] > latest['MACD_Signal'] and latest['MACD_Hist'] > 0
-        stoch_bullish = has_stoch and latest['Stoch_K'] < 20 and latest['Stoch_D'] < 20 and latest['Stoch_K'] > latest['Stoch_D']
-        adx_strong_trend = has_adx and latest['ADX'] > 25 and latest['DI+'] > latest['DI-']
-        
-        # Combine signals for stronger buy recommendation
-        # Classic RSI + Bollinger Bands + EMA strategy
-        if rsi_oversold and price_above_bb_lower and short_term_uptrend:
-            signals.append(f"🚀 Buy {ticker} at {latest['Close']:.2f} (Oversold, price above lower Bollinger Band, and uptrend).")
-            # Store the buying price
-            if user_id not in user_data:
-                user_data[user_id] = {}
-            user_data[user_id][ticker] = latest['Close']
-        
-        # MACD + Stochastic + ADX strategy
-        elif has_macd and has_stoch and has_adx and macd_bullish and stoch_bullish and adx_strong_trend:
-            signals.append(f"🚀 Buy {ticker} at {latest['Close']:.2f} (MACD bullish, Stochastic oversold with bullish crossover, strong trend).")
-            # Store the buying price
-            if user_id not in user_data:
-                user_data[user_id] = {}
-            user_data[user_id][ticker] = latest['Close']
-        
-        # Golden cross (longer-term bullish signal)
-        elif golden_cross and short_term_uptrend and price_above_bb_lower:
-            signals.append(f"🚀 Buy {ticker} at {latest['Close']:.2f} (Golden cross detected, price in uptrend and above lower Bollinger Band).")
-            # Store the buying price
-            if user_id not in user_data:
-                user_data[user_id] = {}
-            user_data[user_id][ticker] = latest['Close']
+    # Generate signals using the selected strategy
+    signals = strategy.generate_signals(data, user_id, ticker, user_data)
     
+    # Return the signals
     return signals
+
+# Function to set a user's preferred strategy
+def set_user_strategy(user_id, strategy_name):
+    if strategy_name in AVAILABLE_STRATEGIES:
+        user_strategies[user_id] = strategy_name
+        save_user_strategies()
+        return True
+    return False
+
+# Function to get a user's preferred strategy
+def get_user_strategy(user_id):
+    return user_strategies[user_id]
 
 # Function to handle the /start command
 def start(update: Update, context: CallbackContext):
-    update.message.reply_text("Welcome! Send me a stock ticker (e.g., NVDA) to get trading signals.")
+    user_name = update.message.from_user.first_name
+    welcome_message = f"Welcome, Mr. Otmane! I'm your Stock Prophet bot. Send me a stock ticker (e.g., NVDA) to get trading signals and forecasts."
+    update.message.reply_text(welcome_message)
 
 # Function to analyze a stock ticker
-def analyze_ticker(ticker):
+def analyze_ticker(ticker, user_id="test_user"):
     try:
         data = get_stock_data(ticker)
         
         # Check if we have valid data
         if data is None or data.empty:
             logger.error(f"No data returned for ticker {ticker}")
-            return f"Sorry, I couldn't retrieve data for {ticker}. The ticker may be invalid or there might be connection issues."
+            return f"Mr. Otmane, I couldn't retrieve data for {ticker}. The ticker may be invalid or there might be connection issues."
         
         # Log data shape for debugging
         logger.info(f"Retrieved data for {ticker} with shape: {data.shape}")
@@ -380,13 +431,30 @@ def analyze_ticker(ticker):
         try:
             data = calculate_indicators(data)
             trend = determine_trend(data)
-            signals = generate_signals(data, "test_user", ticker)
             
             # Get price forecast
             forecast_values = forecast(data)
-
+            
+            # Store the forecast values in the DataFrame's attrs (metadata)
+            # This makes them accessible to strategy functions
+            data.attrs['forecast_values'] = forecast_values
+            
+            # Get the user's preferred strategy
+            strategy_name = get_user_strategy(user_id)
+            strategy = get_strategy(strategy_name)
+            signals = generate_signals(data, user_id, ticker)
+            
+            # Determine if price is forecasted to increase
+            price_trend_up = False
+            if forecast_values:
+                current_price = data['Close'].iloc[-1]
+                last_forecast = forecast_values[-1]
+                price_trend_up = last_forecast > current_price
+                price_change_pct = ((last_forecast / current_price) - 1) * 100
+            
             response = (
-                f"📊 Trend for {ticker}: {trend}\n\n"
+                f"Mr. Otmane, here's your analysis for {ticker}:\n\n"
+                f"📊 Trend: {trend}\n\n"
                 f"📉 Technical Indicators:\n"
                 f"RSI: {data['RSI'].iloc[-1]:.2f}\n"
                 f"EMA (9): {data['EMA_9'].iloc[-1]:.2f}\n"
@@ -414,27 +482,44 @@ def analyze_ticker(ticker):
             
             # Add price forecast if available
             if forecast_values:
-                response += f"\n📈 Price Forecast for {ticker} (next 5 hours):\n"
+                current_price = data['Close'].iloc[-1]
+                last_forecast = forecast_values[-1]
+                price_change_pct = ((last_forecast / current_price) - 1) * 100
+                price_trend_up = last_forecast > current_price
+                
+                response += f"\n📈 Price Forecast (next 5 hours):\n"
                 for i, price in enumerate(forecast_values):
-                    response += f"{i+1}h: {price:.2f}\n"
+                    response += f"{i+1}h: ${price:.2f}\n"
+                
+                # Add prediction-based trading guidance
+                if price_trend_up:
+                    response += f"\n📈 Price is predicted to rise by {price_change_pct:.2f}% over 5 hours.\n"
+                    response += f"Standard trading thresholds applied (take profit: {strategy.parameters['take_profit']}%, stop loss: {strategy.parameters['stop_loss']}%).\n"
+                else:
+                    response += f"\n📉 Price is predicted to fall by {abs(price_change_pct):.2f}% over 5 hours.\n"
+                    response += f"Conservative trading thresholds recommended (take profit: 1%, stop loss: 5%).\n"
             else:
                 response += f"\n⚠️ Price forecast unavailable at the moment.\n"
             
-            response += "\n🚀 Trading Signals:\n"
+            response += f"\n🚀 Trading Signals (using {strategy.name} Strategy):\n"
             
             # Add signals if any exist
             if signals:
                 response += "\n".join(signals)
             else:
                 response += "No strong signals at the moment."
+            
+            # Add advice on strategy
+            if not signals:
+                response += f"\n\nMr. Otmane, you might want to try a different strategy for {ticker}. Use /strategies to view options."
                 
             return response
         except Exception as inner_e:
             logger.error(f"Error processing indicators for {ticker}: {inner_e}")
-            return f"Error processing indicators for {ticker}: {str(inner_e)}"
+            return f"Mr. Otmane, there was an error processing indicators for {ticker}: {str(inner_e)}"
     except Exception as e:
         logger.error(f"Error: {e}")
-        return f"Sorry, I couldn't process your request for {ticker}. Error: {str(e)}"
+        return f"Mr. Otmane, I couldn't process your request for {ticker}. Error: {str(e)}"
 
 
 
@@ -445,15 +530,70 @@ def handle_ticker(update: Update, context: CallbackContext):
     # Extract ticker from the message
     if update.message.text.startswith('/ticker'):
         if not context.args:
-            update.message.reply_text("Please provide a ticker symbol. Example: /ticker AAPL")
+            update.message.reply_text("Mr. Otmane, please provide a ticker symbol. Example: /ticker AAPL")
             return
         ticker = context.args[0].upper()
     else:
         ticker = update.message.text.upper()
     
-    # Analyze the ticker
-    response = analyze_ticker(ticker)
-    update.message.reply_text(response)
+    # Indicate that analysis is in progress
+    update.message.reply_text(f"Analyzing {ticker}... please wait, Mr. Otmane.")
+    
+    try:
+        # Get stock data
+        data = get_stock_data(ticker)
+        
+        # Check if we have valid data
+        if data is None or data.empty:
+            update.message.reply_text(f"Mr. Otmane, I couldn't retrieve data for {ticker}. The ticker may be invalid or there might be connection issues.")
+            return
+        
+        # Calculate indicators
+        data = calculate_indicators(data)
+        
+        # Get forecasts
+        forecast_values = forecast(data)
+        
+        # Generate a chart
+        try:
+            # Create charts directory if it doesn't exist
+            if not os.path.exists('charts'):
+                os.makedirs('charts')
+                
+            # Generate chart with forecast
+            chart_base64 = generate_chart(data, ticker, show_forecast=True, forecast_values=forecast_values)
+            
+            # Convert base64 to image file
+            img_data = base64.b64decode(chart_base64)
+            img_path = f"charts/{ticker}_{int(time.time())}.png"
+            
+            with open(img_path, 'wb') as f:
+                f.write(img_data)
+            
+            # Send the chart to the user
+            with open(img_path, 'rb') as photo:
+                update.message.reply_photo(
+                    photo=photo,
+                    caption=f"Mr. Otmane, here's your technical analysis chart for {ticker}"
+                )
+            
+            # Analyze the ticker - pass the user ID
+            response = analyze_ticker(ticker, user_id)
+            
+            # Send the text analysis after the chart
+            update.message.reply_text(response)
+            
+        except Exception as chart_error:
+            logger.error(f"Error generating chart for {ticker}: {chart_error}")
+            
+            # If chart fails, still send the text analysis
+            response = analyze_ticker(ticker, user_id)
+            update.message.reply_text(response)
+            update.message.reply_text("Mr. Otmane, I couldn't generate a chart visualization at this time.")
+    
+    except Exception as e:
+        logger.error(f"Error in handle_ticker: {e}")
+        update.message.reply_text(f"Mr. Otmane, there was an error analyzing {ticker}. Please try again later.")
 
 # Function to add a stock to the watchlist
 def add_to_watchlist(update: Update, context: CallbackContext):
@@ -461,7 +601,7 @@ def add_to_watchlist(update: Update, context: CallbackContext):
     
     # Check if ticker is provided
     if not context.args:
-        update.message.reply_text("Please provide a ticker symbol. Example: /add AAPL")
+        update.message.reply_text("Mr. Otmane, please provide a ticker symbol. Example: /add AAPL")
         return
     
     ticker = context.args[0].upper()
@@ -469,16 +609,16 @@ def add_to_watchlist(update: Update, context: CallbackContext):
     # Verify if the ticker exists by trying to fetch data
     data = get_stock_data(ticker)
     if data is None or data.empty:
-        update.message.reply_text(f"Could not add {ticker} to watchlist. The ticker may be invalid.")
+        update.message.reply_text(f"Mr. Otmane, I could not add {ticker} to your watchlist. The ticker may be invalid.")
         return
     
     # Add to watchlist if not already there
     if ticker not in user_watchlists[user_id]:
         user_watchlists[user_id].append(ticker)
         save_watchlists()
-        update.message.reply_text(f"Added {ticker} to your watchlist! You'll receive regular updates on this stock.")
+        update.message.reply_text(f"Mr. Otmane, I've added {ticker} to your watchlist! You'll receive regular updates on this stock every 30 minutes.")
     else:
-        update.message.reply_text(f"{ticker} is already in your watchlist.")
+        update.message.reply_text(f"Mr. Otmane, {ticker} is already in your watchlist.")
 
 # Function to remove a stock from the watchlist
 def remove_from_watchlist(update: Update, context: CallbackContext):
@@ -523,8 +663,8 @@ def send_watchlist_notifications(context: CallbackContext):
             last_time = last_notification_time[user_id][ticker]
             if now - last_time >= notification_interval:
                 try:
-                    # Get the analysis and send it
-                    analysis = analyze_ticker(ticker)
+                    # Get the analysis and send it - pass the user_id
+                    analysis = analyze_ticker(ticker, user_id)
                     context.bot.send_message(chat_id=user_id, text=analysis)
                     
                     # Update the last notification time
@@ -659,9 +799,44 @@ def remove_from_portfolio(update: Update, context: CallbackContext):
     else:
         update.message.reply_text("Your portfolio is empty.")
 
+# Function to get strategy information
+def get_strategy_info(update: Update, context: CallbackContext):
+    strategies_info = get_available_strategies_info()
+    user_id = str(update.message.from_user.id)
+    current_strategy = get_user_strategy(user_id)
+    
+    response = "*Available Trading Strategies:*\n\n"
+    for name, description in strategies_info.items():
+        if name == current_strategy:
+            response += f"✅ *{name}* (ACTIVE): {description}\n\n"
+        else:
+            response += f"• *{name}*: {description}\n\n"
+    
+    response += "\nUse /strategy STRATEGY_NAME to change your active strategy."
+    update.message.reply_text(response, parse_mode='Markdown')
+
+# Function to set strategy
+def set_strategy(update: Update, context: CallbackContext):
+    user_id = str(update.message.from_user.id)
+    
+    # Check if strategy name is provided
+    if not context.args:
+        update.message.reply_text("Please provide a strategy name. Example: /strategy rsi\nUse /strategies to see available options.")
+        return
+    
+    strategy_name = context.args[0].lower()
+    
+    # Update the user's strategy
+    if set_user_strategy(user_id, strategy_name):
+        update.message.reply_text(f"Mr. Otmane, your trading strategy has been updated to: *{strategy_name}*", parse_mode='Markdown')
+    else:
+        update.message.reply_text(f"Sorry, '{strategy_name}' is not a valid strategy. Use /strategies to see available options.")
+
 # Function to display available commands
 def help_command(update: Update, context: CallbackContext):
-    help_text = """
+    help_text = f"""
+*Welcome, Mr. Otmane!*
+
 *Stock Prophet Bot Commands*
 
 /start - Start the bot and get a welcome message
@@ -678,10 +853,14 @@ def help_command(update: Update, context: CallbackContext):
 /buy TICKER PRICE QUANTITY - Add a stock to your portfolio
 /sell TICKER - Remove a stock from your portfolio
 
+*Strategy Commands:*
+/strategies - View all available trading strategies
+/strategy NAME - Set your preferred trading strategy (e.g., /strategy macd)
+
 You can also just send a ticker symbol directly without the /ticker command.
 
 *About Stock Prophet*
-This bot analyzes stocks using technical indicators and helps you make trading decisions.
+This bot analyzes stocks using technical indicators and helps you make informed trading decisions.
 
 *Technical Indicators Used:*
 • RSI (Relative Strength Index)
@@ -692,16 +871,18 @@ This bot analyzes stocks using technical indicators and helps you make trading d
 • ADX (Average Directional Index)
 
 *Price Forecasting:*
-• Uses ARIMA (Auto-Regressive Integrated Moving Average) model
+• Uses adaptive ARIMA model for accurate predictions
+• Generates visual chart with price projections
 • Forecasts price movement for the next 4 hours
 • Automatic updates every 30 minutes for your watchlist stocks
 
 *Trading Strategies:*
-• Classic RSI + Bollinger Bands + EMA strategy
-• MACD + Stochastic + ADX strategy
-• Golden/Death Cross with confirmation
+• RSI Strategy - Uses oversold/overbought conditions
+• Bollinger Bands Strategy - Mean reversion trading
+• MACD Strategy - Trend following with crossovers
+• Combined Strategy - Multiple indicators for stronger confirmation
 
-The bot uses a 2% take profit / stop loss when positions are opened.
+The bot uses a configurable take profit / stop loss when positions are opened.
     """
     update.message.reply_text(help_text, parse_mode='Markdown')
 
@@ -718,9 +899,10 @@ def run_telegram_bot():
             # Instead of failing, we'll use the test_mode
             return False
             
-        # Load any saved watchlists and portfolios
+        # Load any saved watchlists, portfolios, and strategies
         load_watchlists()
         load_portfolios()
+        load_user_strategies()
             
         updater = Updater(token)
         dispatcher = updater.dispatcher
@@ -741,12 +923,38 @@ def run_telegram_bot():
         dispatcher.add_handler(CommandHandler("buy", add_to_portfolio))
         dispatcher.add_handler(CommandHandler("sell", remove_from_portfolio))
         
+        # Add strategy command handlers
+        dispatcher.add_handler(CommandHandler("strategies", get_strategy_info))
+        dispatcher.add_handler(CommandHandler("strategy", set_strategy))
+        
         # Add a handler for direct ticker input (no command)
         dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_ticker))
         
         # Set up automatic notifications job (runs every 30 seconds to check tickers)
         job_queue.run_repeating(send_watchlist_notifications, interval=30, first=30)
         logger.info("Set up automatic notifications job (checking every 30 seconds)")
+
+        # Register commands with Telegram using setMyCommands API
+        from telegram import BotCommand
+        commands = [
+            BotCommand("start", "Start the bot and get a welcome message"),
+            BotCommand("help", "Show help with all available commands"),
+            BotCommand("ticker", "Analyze a stock ticker (e.g., /ticker AAPL)"),
+            BotCommand("add", "Add a stock to your watchlist"),
+            BotCommand("remove", "Remove a stock from your watchlist"),
+            BotCommand("watchlist", "View your current watchlist"),
+            BotCommand("portfolio", "Show your current portfolio and performance"),
+            BotCommand("buy", "Add a stock to your portfolio (e.g., /buy AAPL 150.00 10)"),
+            BotCommand("sell", "Remove a stock from your portfolio"),
+            BotCommand("strategies", "View all available trading strategies"),
+            BotCommand("strategy", "Set your preferred trading strategy")
+        ]
+        
+        try:
+            updater.bot.set_my_commands(commands)
+            logger.info("Successfully registered commands with Telegram")
+        except Exception as cmd_error:
+            logger.error(f"Error registering commands: {cmd_error}")
 
         # Start the bot
         print("Starting Telegram bot with token:", token[:5] + "..." + token[-5:])
@@ -762,6 +970,7 @@ def run_telegram_bot():
 def test_mode():
     print("Running in test mode without Telegram bot")
     print("Enter a stock ticker (e.g., AAPL, MSFT, GOOG) or 'quit' to exit:")
+    user_id = "test_user"  # Default test user ID
     
     while True:
         ticker = input("> ").strip().upper()
@@ -770,7 +979,7 @@ def test_mode():
         
         if ticker:
             print("\nAnalyzing ticker:", ticker)
-            result = analyze_ticker(ticker)
+            result = analyze_ticker(ticker, user_id)
             print("\n" + result + "\n")
 
 # Main entry point

@@ -1,0 +1,113 @@
+import yfinance as yf
+import pandas_ta as ta
+from telegram import Update
+from telegram.ext import Updater, CommandHandler, CallbackContext
+import logging
+
+# Enable logging
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Dictionary to store user data (in memory)
+user_data = {}
+
+# Function to fetch stock data
+def get_stock_data(ticker, period="1d", interval="1h"):
+    stock = yf.Ticker(ticker)
+    data = stock.history(period=period, interval=interval)
+    return data
+
+# Function to calculate technical indicators
+def calculate_indicators(data):
+    # RSI
+    data['RSI'] = ta.rsi(data['Close'], length=14)
+    
+    # EMAs (short-term and long-term)
+    data['EMA_9'] = ta.ema(data['Close'], length=9)
+    data['EMA_21'] = ta.ema(data['Close'], length=21)
+    
+    # Bollinger Bands
+    bbands = ta.bbands(data['Close'], length=20)
+    data['BB_upper'] = bbands['BBU_20_2.0']
+    data['BB_middle'] = bbands['BBM_20_2.0']
+    data['BB_lower'] = bbands['BBL_20_2.0']
+    
+    return data
+
+# Function to determine trend
+def determine_trend(data):
+    if data['EMA_9'].iloc[-1] > data['EMA_21'].iloc[-1]:
+        return "Uptrend"
+    elif data['EMA_9'].iloc[-1] < data['EMA_21'].iloc[-1]:
+        return "Downtrend"
+    else:
+        return "Sideways/Neutral"
+
+# Function to generate entry/exit signals
+def generate_signals(data, user_id, ticker):
+    latest = data.iloc[-1]
+    signals = []
+
+    # Check if the user has an open position for this ticker
+    if user_id in user_data and ticker in user_data[user_id]:
+        buying_price = user_data[user_id][ticker]
+        # Sell Signal (Take Profit or Stop Loss)
+        if (latest['Close'] >= buying_price * 1.02) or (latest['Close'] <= buying_price * 0.98):  # 2% profit or 2% loss
+            signals.append(f"📉 Sell {ticker} at {latest['Close']:.2f} (Take profit or stop loss triggered).")
+            del user_data[user_id][ticker]  # Close the position
+    else:
+        # Buy Signal
+        if (latest['RSI'] < 30) and (latest['Close'] > latest['BB_lower']) and (latest['EMA_9'] > latest['EMA_21']):
+            signals.append(f"🚀 Buy {ticker} at {latest['Close']:.2f} (Oversold, price above lower Bollinger Band, and uptrend).")
+            # Store the buying price
+            if user_id not in user_data:
+                user_data[user_id] = {}
+            user_data[user_id][ticker] = latest['Close']
+
+    return signals
+
+# Function to handle the /start command
+def start(update: Update, context: CallbackContext):
+    update.message.reply_text("Welcome! Send me a stock ticker (e.g., NVDA) to get trading signals.")
+
+# Function to handle the stock ticker input
+def handle_ticker(update: Update, context: CallbackContext):
+    user_id = update.message.from_user.id
+    ticker = update.message.text.upper()
+    try:
+        data = get_stock_data(ticker)
+        data = calculate_indicators(data)
+        trend = determine_trend(data)
+        signals = generate_signals(data, user_id, ticker)
+
+        response = (
+            f"📊 Trend for {ticker}: {trend}\n\n"
+            f"📉 Technical Indicators:\n"
+            f"RSI: {data['RSI'].iloc[-1]:.2f}\n"
+            f"EMA (9): {data['EMA_9'].iloc[-1]:.2f}\n"
+            f"EMA (21): {data['EMA_21'].iloc[-1]:.2f}\n"
+            f"Bollinger Bands (Upper/Middle/Lower): {data['BB_upper'].iloc[-1]:.2f}/{data['BB_middle'].iloc[-1]:.2f}/{data['BB_lower'].iloc[-1]:.2f}\n\n"
+            f"🚀 Trading Signals:\n"
+            + "\n".join(signals) if signals else "No strong signals at the moment."
+        )
+        update.message.reply_text(response)
+    except Exception as e:
+        logger.error(f"Error: {e}")
+        update.message.reply_text("Sorry, I couldn't process your request. Please try again.")
+
+# Main function to run the bot
+def main():
+    token = "YOUR_TELEGRAM_BOT_TOKEN"  # Replace with your bot token
+    updater = Updater(token)
+    dispatcher = updater.dispatcher
+
+    # Add handlers
+    dispatcher.add_handler(CommandHandler("start", start))
+    dispatcher.add_handler(CommandHandler("ticker", handle_ticker))
+
+    # Start the bot
+    updater.start_polling()
+    updater.idle()
+
+if __name__ == "__main__":
+    main()
