@@ -380,19 +380,19 @@ class CombinedStrategy(Strategy):
                 bearish_indicators = 0
                 
                 # RSI Overbought
-                if has_rsi and latest['RSI'] > self.parameters['rsi_overbought']:
+                if has_rsi and latest['RSI'] is not None and latest['RSI'].item() > self.parameters['rsi_overbought']:
                     bearish_indicators += 1
                 
                 # MACD Bearish Crossover
-                if has_macd and latest['MACD'] < latest['MACD_Signal']:
+                if has_macd and latest['MACD'] is not None and latest['MACD_Signal'] is not None and latest['MACD'].item() < latest['MACD_Signal'].item():
                     bearish_indicators += 1
                 
                 # Price at/above upper Bollinger Band
-                if has_bb and latest['Close'] >= latest['BB_upper']:
+                if has_bb and latest['Close'] is not None and latest['BB_upper'] is not None and latest['Close'].item() >= latest['BB_upper'].item():
                     bearish_indicators += 1
                 
                 # Short-term EMA crosses below long-term
-                if has_ema and latest['EMA_9'] < latest['EMA_21']:
+                if has_ema and latest['EMA_9'] is not None and latest['EMA_21'] is not None and latest['EMA_9'].item() < latest['EMA_21'].item():
                     bearish_indicators += 1
                 
                 # If enough bearish indicators, suggest selling
@@ -404,19 +404,19 @@ class CombinedStrategy(Strategy):
             bullish_indicators = 0
             
             # RSI Oversold
-            if has_rsi and latest['RSI'] < self.parameters['rsi_oversold']:
+            if has_rsi and latest['RSI'] is not None and latest['RSI'].item() < self.parameters['rsi_oversold']:
                 bullish_indicators += 1
             
             # MACD Bullish Crossover
-            if has_macd and latest['MACD'] > latest['MACD_Signal']:
+            if has_macd and latest['MACD'] is not None and latest['MACD_Signal'] is not None and latest['MACD'].item() > latest['MACD_Signal'].item():
                 bullish_indicators += 1
             
             # Price at/below lower Bollinger Band
-            if has_bb and latest['Close'] <= latest['BB_lower']:
+            if has_bb and latest['Close'] is not None and latest['BB_lower'] is not None and latest['Close'].item() <= latest['BB_lower'].item():
                 bullish_indicators += 1
             
             # Short-term EMA crosses above long-term
-            if has_ema and latest['EMA_9'] > latest['EMA_21']:
+            if has_ema and latest['EMA_9'] is not None and latest['EMA_21'] is not None and latest['EMA_9'].item() > latest['EMA_21'].item():
                 bullish_indicators += 1
             
             # If enough bullish indicators, suggest buying

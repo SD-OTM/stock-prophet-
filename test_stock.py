@@ -2,8 +2,10 @@ import os
 import sys
 import json
 import time
-from main import (analyze_ticker, user_portfolios, add_to_portfolio, 
+import pandas as pd
+from main import (analyze_ticker, user_portfolios, add_to_portfolio,
                  remove_from_portfolio, show_portfolio, save_portfolios)
+from backtesting import cmd_backtest
 
 def test_analyze():
     """
@@ -81,12 +83,65 @@ def test_portfolio():
     
     print("\n=== Portfolio Management Test Complete ===")
 
+def test_backtest():
+    """
+    Test the backtesting functionality with a specific ticker
+    """
+    if len(sys.argv) < 3:
+        print("Usage for backtesting: python test_stock.py backtest TICKER [STRATEGY] [START_DATE] [END_DATE] [TIMEFRAME]")
+        print("Example: python test_stock.py backtest AAPL rsi 2024-01-01 2024-03-15 1d")
+        return
+        
+    ticker = sys.argv[2].upper()
+    strategy = sys.argv[3] if len(sys.argv) > 3 else "combined"
+    start_date = sys.argv[4] if len(sys.argv) > 4 else None
+    end_date = sys.argv[5] if len(sys.argv) > 5 else None
+    timeframe = sys.argv[6] if len(sys.argv) > 6 else "1d"
+    
+    print(f"\n=== Backtesting {strategy.upper()} strategy on {ticker} ===")
+    print(f"Period: {start_date or 'Default'} to {end_date or 'Default'}, Timeframe: {timeframe}")
+    
+    result = cmd_backtest(ticker, strategy, start_date, end_date, timeframe)
+    
+    if result:
+        print("\nBacktest completed successfully.")
+        print(f"Strategy Return: {result.strategy_return:.2f}%")
+        
+        # Safe handling of buy_and_hold_return
+        if hasattr(result, 'buy_and_hold_return'):
+            if isinstance(result.buy_and_hold_return, pd.Series):
+                print(f"Buy & Hold Return: Not calculated (data issue)")
+                # Use just the strategy return for outperformance
+                print(f"Outperformance: N/A")
+            else:
+                print(f"Buy & Hold Return: {result.buy_and_hold_return:.2f}%")
+                print(f"Outperformance: {result.strategy_return - result.buy_and_hold_return:.2f}%")
+        else:
+            print(f"Buy & Hold Return: Not calculated")
+            print(f"Outperformance: N/A")
+        print(f"Total Trades: {len(result.trades)}")
+        
+        # Check if chart was generated
+        chart_file = f"backtest_charts/{ticker}_{strategy}_{start_date or 'auto'}_{end_date or 'auto'}.png"
+        if os.path.exists(chart_file):
+            print(f"Chart saved to: {chart_file}")
+    else:
+        print("Backtesting failed. See logs for details.")
+    
+    print("\n=== Backtesting Test Complete ===")
+
 def main():
     """
     Main test function
     """
-    if len(sys.argv) > 1 and sys.argv[1].lower() == "portfolio":
-        test_portfolio()
+    if len(sys.argv) > 1:
+        command = sys.argv[1].lower()
+        if command == "portfolio":
+            test_portfolio()
+        elif command == "backtest":
+            test_backtest()
+        else:
+            test_analyze()
     else:
         test_analyze()
 
