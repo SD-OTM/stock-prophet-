@@ -40,6 +40,11 @@ jobs:
       run: |
         bash github_setup.sh
         
+    - name: Patch pandas-ta for numpy compatibility
+      run: |
+        echo "Patching pandas-ta package to fix numpy compatibility issues"
+        python patch_pandas_ta.py
+        
     - name: Run all tests with CI optimizations
       run: |
         echo "Running Stock Prophet test suite in CI mode"
