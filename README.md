@@ -1,6 +1,6 @@
 # Stock Prophet
 
-A sophisticated stock analysis and forecasting application designed to provide comprehensive financial insights using Python.
+A sophisticated stock analysis and forecasting application designed to provide comprehensive financial insights using Python. The application combines technical analysis with machine learning to deliver reliable trading signals.
 
 ## Features
 
