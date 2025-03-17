@@ -40,15 +40,26 @@ Optional Variables (for SMS functionality):
 - `TWILIO_AUTH_TOKEN`: Your Twilio auth token
 - `TWILIO_PHONE_NUMBER`: Your Twilio phone number
 
-### 4. Deploy
+### 4. Configure Railway Service
 
-1. Railway will automatically start deploying your application once the repository is connected
+After connecting your repository, you'll need to make some adjustments to the service settings:
+
+1. Go to the "Settings" tab of your service
+2. Under "Build & Deploy", make sure:
+   - Builder: NIXPACKS
+   - Start Command: `python heroku_main.py`
+   - Restart Policy: ON_FAILURE
+3. Important: Under "Files" make sure to rename `railway_requirements.txt` to `requirements.txt` in the Railway file system
+
+### 5. Deploy
+
+1. Railway will automatically start deploying your application once the repository is connected and settings are configured
 2. Wait for the build and deployment to complete
 3. Once deployed, copy the deployment URL (e.g., https://stock-prophet-production.up.railway.app/)
 4. Update the `APP_URL` environment variable with this URL
 5. Railway will automatically redeploy with the updated variable
 
-### 5. Verify Deployment
+### 6. Verify Deployment
 
 1. Open Telegram and navigate to your bot
 2. Type `/start` to begin interacting with your bot
