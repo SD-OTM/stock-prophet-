@@ -583,8 +583,8 @@ class DailyPickScanner:
         
         return result_str
 
-    def generate_command_response(self):
-        """Generate response for the /picks command"""
+    def generate_command_response(self, user_id=None):
+        """Generate response for the /picks command with personalization"""
         # First ensure we have scanned for opportunities
         if not self.results:
             self.scan_opportunities()
@@ -592,8 +592,18 @@ class DailyPickScanner:
         # Simulate past trades to get performance
         self.simulate_trades(days_back=30)
         
-        # Return formatted results
-        return self.format_results()
+        # Get formatted results
+        results = self.format_results()
+        
+        # Add personalization if using watchlist
+        if user_id and self.tickers != DEFAULT_TARGET_STOCKS:
+            # Prepend a personalized message
+            personalized_intro = (
+                "Mr. Otmane, here are your personalized daily stock picks based on your watchlist:\n\n"
+            )
+            return personalized_intro + results
+        
+        return results
 
 def daily_picks_command(user_id=None):
     """Handle /picks command to get daily stock picks using user's watchlist if available"""
@@ -606,7 +616,9 @@ def daily_picks_command(user_id=None):
         scanner = DailyPickScanner(tickers=focus_stocks)
         scanner.scan_opportunities()
         scanner.simulate_trades()
-        return scanner.generate_command_response()
+        
+        # Pass user_id to generate personalized response
+        return scanner.generate_command_response(user_id=user_id)
     except Exception as e:
         logger.error(f"Error in daily_picks_command: {e}")
         return f"Error generating daily picks: {str(e)}"

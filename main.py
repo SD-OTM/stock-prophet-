@@ -1583,8 +1583,12 @@ def get_daily_picks(update: Update, context: CallbackContext):
         # Generate a unique message ID (timestamp + command)
         message_id = f"MSG-{int(time.time())}-PICKS"
         
-        # Get daily picks
-        picks_results = daily_picks_command()
+        # Get user ID to personalize picks based on watchlist
+        user = update.effective_user
+        user_id = str(user.id)
+        
+        # Get daily picks using user's watchlist
+        picks_results = daily_picks_command(user_id)
         
         # Send the results to the user
         update.message.reply_text(f"ID: {message_id}\n{picks_results}", parse_mode='Markdown')
