@@ -405,47 +405,15 @@ class DailyPickScanner:
         
         for ticker in test_tickers:
             try:
-                # Use our improved helper method that properly handles MultiIndex
-                # We can't use period parameter here as we need specific date range, so use yfinance directly
-                data = yf.download(ticker, start=start_date, end=end_date, interval=interval, progress=False)
-                if data.empty or len(data) < 5:
+                # Use our improved method directly instead of downloading again
+                data = self._get_stock_data(ticker, period=f"{days_back}d", interval=interval)
+                if data is None or len(data) < 5:
                     logger.warning(f"Not enough historical data for {ticker}")
                     continue
                 
-                # Handle MultiIndex if present (yfinance API change) with our improved method
-                if isinstance(data.index, pd.MultiIndex):
-                    logger.info(f"Converting MultiIndex to DatetimeIndex for {ticker} (simulation)")
-                    
-                    # For intraday data, combine date and time for proper datetime index
-                    if interval in ["1h", "30m", "15m", "5m", "1m"]:
-                        if data.index.nlevels >= 2:
-                            # Create proper datetime objects from the MultiIndex levels
-                            try:
-                                datetime_index = pd.to_datetime(
-                                    data.index.get_level_values(0).strftime('%Y-%m-%d') + ' ' + 
-                                    data.index.get_level_values(1).strftime('%H:%M:%S')
-                                )
-                            except Exception as e:
-                                logger.warning(f"Error creating datetime index: {e}, falling back to first level only")
-                                datetime_index = data.index.get_level_values(0)
-                        else:
-                            # If it's a single level index for some reason
-                            datetime_index = data.index.get_level_values(0)
-                    else:
-                        # For daily data, just use the first level
-                        datetime_index = data.index.get_level_values(0)
-                    
-                    # Create a new DataFrame with the DatetimeIndex
-                    new_data = pd.DataFrame(index=datetime_index)
-                    
-                    # Copy all columns individually
-                    for col in data.columns:
-                        new_data[col] = data[col].values
-                    
-                    data = new_data
-                
-                # Ensure datetime index
+                # Ensure datetime index (already handled in _get_stock_data, but double-check)
                 if not isinstance(data.index, pd.DatetimeIndex):
+                    logger.warning(f"Converting index to DatetimeIndex for {ticker} (simulation)")
                     data.index = pd.to_datetime(data.index)
                 
                 # Calculate indicators
