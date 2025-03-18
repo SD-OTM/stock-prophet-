@@ -213,6 +213,7 @@ class DailyPickScanner:
                 intraday_signals = []
                 for timeframe in self.timeframes:
                     try:
+                        # Use our improved method to handle MultiIndex
                         intraday_data = self._get_stock_data(ticker, period="2d", interval=timeframe)
                         if intraday_data is not None and len(intraday_data) > 10:
                             intraday_data = calculate_indicators(intraday_data)
@@ -224,10 +225,21 @@ class DailyPickScanner:
                                 logger.warning(f"Error generating intraday signals for {ticker}: {e}")
                                 has_intraday_signals = False
                                 intraday_signal_data = {}
+                                
                             if has_intraday_signals and 'buy' in intraday_signal_data and intraday_signal_data['buy']:
+                                # Get the latest timestamp safely
+                                latest_timestamp = intraday_data.index[-1]
+                                
+                                # Format the time portion properly
+                                if isinstance(latest_timestamp, pd.Timestamp):
+                                    signal_time = latest_timestamp.strftime('%H:%M')
+                                else:
+                                    # Handle other index types by converting to Timestamp first
+                                    signal_time = pd.Timestamp(latest_timestamp).strftime('%H:%M')
+                                    
                                 intraday_signals.append({
                                     'timeframe': timeframe,
-                                    'signal_time': intraday_data.index[-1].strftime('%H:%M'),
+                                    'signal_time': signal_time,
                                     'price': safe_float(intraday_data['Close'].iloc[-1])
                                 })
                     except Exception as e:
@@ -316,12 +328,49 @@ class DailyPickScanner:
                 logger.error(f"Error processing {ticker}: {e}")
     
     def _get_stock_data(self, ticker, period="5d", interval="1d"):
-        """Get stock data using yfinance"""
+        """Get stock data using yfinance with improved MultiIndex handling"""
         try:
             data = yf.download(ticker, period=period, interval=interval, progress=False)
             if data.empty or len(data) == 0:
                 logger.warning(f"No data retrieved for {ticker}")
                 return None
+                
+            # Handle MultiIndex if present (yfinance API change)
+            if isinstance(data.index, pd.MultiIndex):
+                logger.info(f"Converting MultiIndex to DatetimeIndex for {ticker} (interval: {interval})")
+                
+                # For intraday data, combine date and time for proper datetime index
+                if interval in ["1h", "30m", "15m", "5m", "1m"]:
+                    if data.index.nlevels >= 2:
+                        # Create proper datetime objects from the MultiIndex levels
+                        try:
+                            datetime_index = pd.to_datetime(
+                                data.index.get_level_values(0).strftime('%Y-%m-%d') + ' ' + 
+                                data.index.get_level_values(1).strftime('%H:%M:%S')
+                            )
+                        except Exception as e:
+                            logger.warning(f"Error creating datetime index: {e}, falling back to first level only")
+                            datetime_index = data.index.get_level_values(0)
+                    else:
+                        # If it's a single level index for some reason
+                        datetime_index = data.index.get_level_values(0)
+                else:
+                    # For daily data, just use the first level
+                    datetime_index = data.index.get_level_values(0)
+                
+                # Create a new DataFrame with the DatetimeIndex
+                new_data = pd.DataFrame(index=datetime_index)
+                
+                # Copy all columns individually
+                for col in data.columns:
+                    new_data[col] = data[col].values
+                
+                data = new_data
+            
+            # Additionally ensure all datetime indexes are properly converted to DatetimeIndex
+            if not isinstance(data.index, pd.DatetimeIndex):
+                data.index = pd.to_datetime(data.index)
+                
             return data
         except Exception as e:
             logger.error(f"Error fetching data for {ticker}: {e}")
@@ -341,9 +390,9 @@ class DailyPickScanner:
         
         return sorted_results[:limit]
     
-    def simulate_trades(self, days_back=30):
+    def simulate_trades(self, days_back=30, interval="1d"):
         """Simulate trades for the past X days to calculate profit"""
-        logger.info(f"Simulating trades for the past {days_back} days...")
+        logger.info(f"Simulating trades for the past {days_back} days with interval {interval}...")
         
         end_date = datetime.datetime.now().strftime('%Y-%m-%d')
         start_date = (datetime.datetime.now() - datetime.timedelta(days=days_back)).strftime('%Y-%m-%d')
@@ -356,11 +405,48 @@ class DailyPickScanner:
         
         for ticker in test_tickers:
             try:
-                # Get historical data
-                data = yf.download(ticker, start=start_date, end=end_date, interval="1d", progress=False)
+                # Use our improved helper method that properly handles MultiIndex
+                # We can't use period parameter here as we need specific date range, so use yfinance directly
+                data = yf.download(ticker, start=start_date, end=end_date, interval=interval, progress=False)
                 if data.empty or len(data) < 5:
                     logger.warning(f"Not enough historical data for {ticker}")
                     continue
+                
+                # Handle MultiIndex if present (yfinance API change) with our improved method
+                if isinstance(data.index, pd.MultiIndex):
+                    logger.info(f"Converting MultiIndex to DatetimeIndex for {ticker} (simulation)")
+                    
+                    # For intraday data, combine date and time for proper datetime index
+                    if interval in ["1h", "30m", "15m", "5m", "1m"]:
+                        if data.index.nlevels >= 2:
+                            # Create proper datetime objects from the MultiIndex levels
+                            try:
+                                datetime_index = pd.to_datetime(
+                                    data.index.get_level_values(0).strftime('%Y-%m-%d') + ' ' + 
+                                    data.index.get_level_values(1).strftime('%H:%M:%S')
+                                )
+                            except Exception as e:
+                                logger.warning(f"Error creating datetime index: {e}, falling back to first level only")
+                                datetime_index = data.index.get_level_values(0)
+                        else:
+                            # If it's a single level index for some reason
+                            datetime_index = data.index.get_level_values(0)
+                    else:
+                        # For daily data, just use the first level
+                        datetime_index = data.index.get_level_values(0)
+                    
+                    # Create a new DataFrame with the DatetimeIndex
+                    new_data = pd.DataFrame(index=datetime_index)
+                    
+                    # Copy all columns individually
+                    for col in data.columns:
+                        new_data[col] = data[col].values
+                    
+                    data = new_data
+                
+                # Ensure datetime index
+                if not isinstance(data.index, pd.DatetimeIndex):
+                    data.index = pd.to_datetime(data.index)
                 
                 # Calculate indicators
                 data = calculate_indicators(data)
@@ -389,7 +475,13 @@ class DailyPickScanner:
                         entry_price = current_price
                         entry_date = current_date
                         in_position = True
-                        logger.info(f"BUY signal: {ticker} @ ${entry_price:.2f} on {entry_date.strftime('%Y-%m-%d')}")
+                        # Handle MultiIndex or standard DatetimeIndex for entry_date
+                        if isinstance(entry_date, pd.Timestamp):
+                            entry_date_str = entry_date.strftime('%Y-%m-%d')
+                        else:
+                            # Handle MultiIndex case
+                            entry_date_str = pd.Timestamp(entry_date).strftime('%Y-%m-%d')
+                        logger.info(f"BUY signal: {ticker} @ ${entry_price:.2f} on {entry_date_str}")
                     
                     elif in_position:
                         # Check for exit conditions
@@ -443,7 +535,13 @@ class DailyPickScanner:
                                 if profit_pct >= 2.0:
                                     self.profitable_trades.append(trade_info)
                             
-                            logger.info(f"SELL signal: {ticker} @ ${exit_price:.2f} on {exit_date.strftime('%Y-%m-%d')} - {exit_reason}")
+                            # Handle MultiIndex or standard DatetimeIndex for exit_date
+                            if isinstance(exit_date, pd.Timestamp):
+                                exit_date_str = exit_date.strftime('%Y-%m-%d')
+                            else:
+                                # Handle MultiIndex case
+                                exit_date_str = pd.Timestamp(exit_date).strftime('%Y-%m-%d')
+                            logger.info(f"SELL signal: {ticker} @ ${exit_price:.2f} on {exit_date_str} - {exit_reason}")
                             
                             # Reset position
                             in_position = False
@@ -570,12 +668,23 @@ class DailyPickScanner:
             recent_profitable = sorted(self.profitable_trades, key=lambda x: x['exit_date'], reverse=True)[:5]
             
             for i, trade in enumerate(recent_profitable, 1):
-                entry_date = trade['entry_date'].strftime('%Y-%m-%d')
-                exit_date = trade['exit_date'].strftime('%Y-%m-%d')
+                # Handle MultiIndex or standard DatetimeIndex for entry_date and exit_date
+                if isinstance(trade['entry_date'], pd.Timestamp):
+                    entry_date_str = trade['entry_date'].strftime('%Y-%m-%d')
+                else:
+                    # Handle MultiIndex case
+                    entry_date_str = pd.Timestamp(trade['entry_date']).strftime('%Y-%m-%d')
+                    
+                if isinstance(trade['exit_date'], pd.Timestamp):
+                    exit_date_str = trade['exit_date'].strftime('%Y-%m-%d')
+                else:
+                    # Handle MultiIndex case
+                    exit_date_str = pd.Timestamp(trade['exit_date']).strftime('%Y-%m-%d')
+                    
                 days = trade['days_held']
                 result_str += f"{i}. {trade['ticker']}: ${trade['entry_price']:.2f} → ${trade['exit_price']:.2f} "
                 result_str += f"(+{trade['profit_pct']:.2f}%) in {days} {'day' if days == 1 else 'days'}\n"
-                result_str += f"   Period: {entry_date} to {exit_date}\n"
+                result_str += f"   Period: {entry_date_str} to {exit_date_str}\n"
         
         # Add timestamp
         import datetime
