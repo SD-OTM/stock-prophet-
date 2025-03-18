@@ -47,6 +47,9 @@ from sentiment import get_sentiment_analysis
 # Import strategies module
 from strategies import get_strategy, update_strategy_params, get_available_strategies_info, AVAILABLE_STRATEGIES
 
+# Import daily picks scanner module
+from daily_pick_scanner import daily_picks_command
+
 # Enable logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -153,10 +156,10 @@ TIMEFRAMES = {
 }
 
 # Default timeframe
-DEFAULT_TIMEFRAME = "hourly"
+DEFAULT_TIMEFRAME = "daily"
 
 # Function to fetch stock data
-def get_stock_data(ticker, period="1d", interval="1h", timeframe=None):
+def get_stock_data(ticker, period="1mo", interval="1d", timeframe=None):
     try:
         # If timeframe is specified, use its settings
         if timeframe and timeframe in TIMEFRAMES:
@@ -1573,6 +1576,27 @@ def check_gold_price(update: Update, context: CallbackContext):
         update.message.reply_text(f"ID: {message_id}\nMr. Otmane, I encountered an error while analyzing gold price: {str(e)}")
 
 # Function to set user's phone number for SMS alerts
+# Command handler for /picks command to get daily stock picks
+def get_daily_picks(update: Update, context: CallbackContext):
+    """Command handler for /picks command to get the best stock picks for same-day trading"""
+    try:
+        # Generate a unique message ID (timestamp + command)
+        message_id = f"MSG-{int(time.time())}-PICKS"
+        
+        # Get user ID to personalize picks based on watchlist
+        user = update.effective_user
+        user_id = str(user.id)
+        
+        # Get daily picks using user's watchlist
+        picks_results = daily_picks_command(user_id)
+        
+        # Send the results to the user
+        update.message.reply_text(f"ID: {message_id}\n{picks_results}", parse_mode='Markdown')
+    except Exception as e:
+        logger.error(f"Error generating daily picks: {e}")
+        message_id = f"MSG-{int(time.time())}-PICKS-ERROR"
+        update.message.reply_text(f"ID: {message_id}\nMr. Otmane, I encountered an error while generating your daily stock picks: {str(e)}. Please try again later.")
+
 def set_phone_number(update: Update, context: CallbackContext):
     """Command handler for /sms command to set user's phone number for SMS alerts"""
     user = update.effective_user
@@ -1781,9 +1805,9 @@ def run_telegram_bot(is_heroku=False, port=None, url=None):
         # Add a handler for direct ticker input (no command)
         dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_ticker))
         
-        # Set up automatic notifications job (runs every 30 seconds to check tickers)
-        job_queue.run_repeating(send_watchlist_notifications, interval=30, first=30)
-        logger.info("Set up automatic notifications job (checking every 30 seconds)")
+        # Set up automatic notifications job (runs every 30 minutes to check tickers)
+        job_queue.run_repeating(send_watchlist_notifications, interval=30*60, first=30)
+        logger.info("Set up automatic notifications job (checking every 30 minutes)")
 
         # Set bot commands - this will make commands appear in the Telegram UI when typing /
         set_bot_commands(updater)

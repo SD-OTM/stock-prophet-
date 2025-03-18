@@ -16,6 +16,17 @@ import main
 from io import BytesIO
 import base64
 
+def safe_float(value):
+    """Safely convert a value to float, handling pandas Series objects"""
+    if hasattr(value, 'item'):
+        try:
+            return float(value.item())
+        except (ValueError, AttributeError):
+            if hasattr(value, 'iloc') and len(value) > 0:
+                return float(value.iloc[0])
+            return 0.0
+    return float(value)
+
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -42,6 +53,7 @@ class BacktestResult:
         self.win_rate = 0.0
         self.buy_and_hold_return = 0.0
         self.strategy_return = 0.0
+        self.total_return = 0.0  # Add total_return attribute to fix the issue
         self.signals = []
         
     def add_trade(self, entry_date, entry_price, exit_date, exit_price, shares, profit_loss, trade_type):
@@ -68,26 +80,32 @@ class BacktestResult:
         """Calculate performance metrics"""
         if not self.trades:
             logger.warning("No trades executed during backtesting period")
+            self.win_rate = 0.0
+            self.profit_factor = 0.0
+            self.max_drawdown = 0.0
+            self.strategy_return = 0.0
+            self.total_return = 0.0  # Set the total_return for compatibility
             return
             
         # Calculate profit metrics
-        winning_trades = [t for t in self.trades if t['profit_loss'] > 0]
-        losing_trades = [t for t in self.trades if t['profit_loss'] <= 0]
+        winning_trades = [t for t in self.trades if safe_float(t['profit_loss']) > 0]
+        losing_trades = [t for t in self.trades if safe_float(t['profit_loss']) <= 0]
         
-        total_profit = sum(t['profit_loss'] for t in winning_trades)
-        total_loss = abs(sum(t['profit_loss'] for t in losing_trades))
+        total_profit = sum(safe_float(t['profit_loss']) for t in winning_trades)
+        total_loss = abs(sum(safe_float(t['profit_loss']) for t in losing_trades))
         
         self.win_rate = len(winning_trades) / len(self.trades) if self.trades else 0
-        self.profit_factor = total_profit / total_loss if total_loss > 0 else float('inf')
+        self.profit_factor = total_profit / total_loss if safe_float(total_loss) > 0 else float('inf')
         
         # Calculate final balance
-        self.final_balance = self.initial_balance + sum(t['profit_loss'] for t in self.trades)
+        self.final_balance = self.initial_balance + sum(safe_float(t['profit_loss']) for t in self.trades)
         self.strategy_return = (self.final_balance / self.initial_balance - 1) * 100.0
+        self.total_return = self.strategy_return  # Set total_return same as strategy_return for compatibility
         
         # Calculate max drawdown
         balance_curve = [self.initial_balance]
         for trade in self.trades:
-            balance_curve.append(balance_curve[-1] + trade['profit_loss'])
+            balance_curve.append(balance_curve[-1] + safe_float(trade['profit_loss']))
             
         peak = self.initial_balance
         drawdowns = []
@@ -113,8 +131,8 @@ class BacktestResult:
             f"Initial Balance: ${self.initial_balance:.2f}",
             f"Final Balance: ${self.final_balance:.2f}",
             f"Total Return: {self.strategy_return:.2f}%",
-            f"Buy & Hold Return: {float(self.buy_and_hold_return) if not isinstance(self.buy_and_hold_return, pd.Series) else 0.0:.2f}%",
-            f"Outperformance: {self.strategy_return - float(self.buy_and_hold_return) if not isinstance(self.buy_and_hold_return, pd.Series) else self.strategy_return:.2f}%",
+            f"Buy & Hold Return: {float(safe_float(self.buy_and_hold_return)):.2f}%",
+            f"Outperformance: {self.strategy_return - float(safe_float(self.buy_and_hold_return)):.2f}%",
             f"",
             f"Trade Statistics:",
             f"Total Trades: {len(self.trades)}",
@@ -126,12 +144,16 @@ class BacktestResult:
         ]
         
         for i, trade in enumerate(self.trades, 1):
-            profit_loss_pct = (trade['exit_price'] / trade['entry_price'] - 1) * 100.0
-            direction = "↑" if profit_loss_pct > 0 else "↓"
+            profit_loss_pct = (safe_float(trade['exit_price']) / safe_float(trade['entry_price']) - 1) * 100.0
+            direction = "↑" if safe_float(profit_loss_pct) > 0 else "↓"
+            # Format dates safely handling Series objects
+            entry_date_str = trade['entry_date'].strftime('%Y-%m-%d %H:%M') if not isinstance(trade['entry_date'], pd.Series) else str(trade['entry_date'])
+            exit_date_str = trade['exit_date'].strftime('%Y-%m-%d %H:%M') if not isinstance(trade['exit_date'], pd.Series) else str(trade['exit_date'])
+            
             report.append(
-                f"{i}. {trade['entry_date'].strftime('%Y-%m-%d %H:%M')} to {trade['exit_date'].strftime('%Y-%m-%d %H:%M')}: "
-                f"${trade['entry_price']:.2f} → ${trade['exit_price']:.2f} {direction} "
-                f"({profit_loss_pct:.2f}%) | P/L: ${trade['profit_loss']:.2f}"
+                f"{i}. {entry_date_str} to {exit_date_str}: "
+                f"${safe_float(trade['entry_price']):.2f} → ${safe_float(trade['exit_price']):.2f} {direction} "
+                f"({profit_loss_pct:.2f}%) | P/L: ${safe_float(trade['profit_loss']):.2f}"
             )
             
         return "\n".join(report)
@@ -183,7 +205,7 @@ class BacktestResult:
         dates = [data.index[0]]
         
         for trade in self.trades:
-            balance_curve.append(balance_curve[-1] + trade['profit_loss'])
+            balance_curve.append(balance_curve[-1] + safe_float(trade['profit_loss']))
             dates.append(trade['exit_date'])
             
         ax2.plot(dates, balance_curve, color='green', linewidth=1.5)
@@ -307,12 +329,34 @@ def run_backtest(ticker, strategy_name, start_date, end_date, timeframe='1d'):
         historical_data = data.iloc[:i+1]
         
         # Generate signals
-        signals = strategy.generate_signals(historical_data, "backtest_user", ticker)
+        signals_list = strategy.generate_signals(historical_data, "backtest_user", ticker)
+        
+        # Check if signals returned is a list (new format) or dictionary (old format)
+        if isinstance(signals_list, list):
+            # Process the signal list
+            buy_signal = False
+            sell_signal = False
+            
+            # Scan through signals for buy/sell indicators
+            for signal in signals_list:
+                if "Buy" in signal or "buy" in signal or "🚀" in signal:
+                    buy_signal = True
+                elif "Sell" in signal or "sell" in signal or "📉" in signal:
+                    sell_signal = True
+            
+            # Convert to dictionary format for backward compatibility
+            signals = {
+                'buy': buy_signal,
+                'sell': sell_signal
+            }
+        else:
+            # Use the signals dictionary directly if that's what was returned
+            signals = signals_list or {}
         
         # Handle trading signals
         if not in_position and 'buy' in signals and signals['buy']:
             # Enter long position
-            position_size = int((available_capital * risk_per_trade) / current_price)
+            position_size = int((available_capital * risk_per_trade) / safe_float(current_price))
             if position_size > 0:
                 entry_price = current_price
                 entry_date = current_date
@@ -321,11 +365,11 @@ def run_backtest(ticker, strategy_name, start_date, end_date, timeframe='1d'):
                 
                 # Record signal
                 result.add_signal(current_date, current_price, 'buy')
-                logger.info(f"BUY signal at {current_date}: {ticker} @ ${current_price:.2f}")
+                logger.info(f"BUY signal at {current_date}: {ticker} @ ${safe_float(current_price):.2f}")
                 
         elif not in_position and 'sell' in signals and signals['sell']:
             # Enter short position (if supported)
-            position_size = int((available_capital * risk_per_trade) / current_price)
+            position_size = int((available_capital * risk_per_trade) / safe_float(current_price))
             if position_size > 0:
                 entry_price = current_price
                 entry_date = current_date
@@ -334,7 +378,7 @@ def run_backtest(ticker, strategy_name, start_date, end_date, timeframe='1d'):
                 
                 # Record signal
                 result.add_signal(current_date, current_price, 'sell')
-                logger.info(f"SELL signal at {current_date}: {ticker} @ ${current_price:.2f}")
+                logger.info(f"SELL signal at {current_date}: {ticker} @ ${safe_float(current_price):.2f}")
                 
         elif in_position:
             # Check for exit conditions
@@ -348,12 +392,12 @@ def run_backtest(ticker, strategy_name, start_date, end_date, timeframe='1d'):
                 exit_signal = False
                 if 'sell' in signals and signals['sell']:
                     exit_signal = True
-                if price_change >= take_profit:
+                if safe_float(price_change) >= take_profit:
                     exit_signal = True
-                    logger.info(f"Take profit triggered: {price_change*100:.2f}%")
-                if price_change <= -stop_loss:
+                    logger.info(f"Take profit triggered: {safe_float(price_change*100):.2f}%")
+                if safe_float(price_change) <= -stop_loss:
                     exit_signal = True
-                    logger.info(f"Stop loss triggered: {price_change*100:.2f}%")
+                    logger.info(f"Stop loss triggered: {safe_float(price_change*100):.2f}%")
                     
                 if exit_signal:
                     # Close long position
@@ -362,8 +406,8 @@ def run_backtest(ticker, strategy_name, start_date, end_date, timeframe='1d'):
                                      position_size, profit_loss, position_type)
                     result.add_signal(current_date, current_price, 'sell')
                     
-                    logger.info(f"Closed LONG position at {current_date}: {ticker} @ ${current_price:.2f}")
-                    logger.info(f"P/L: ${profit_loss:.2f} ({price_change*100:.2f}%)")
+                    logger.info(f"Closed LONG position at {current_date}: {ticker} @ ${safe_float(current_price):.2f}")
+                    logger.info(f"P/L: ${safe_float(profit_loss):.2f} ({safe_float(price_change*100):.2f}%)")
                     
                     # Reset position
                     in_position = False
@@ -376,12 +420,12 @@ def run_backtest(ticker, strategy_name, start_date, end_date, timeframe='1d'):
                 exit_signal = False
                 if 'buy' in signals and signals['buy']:
                     exit_signal = True
-                if price_change >= take_profit:
+                if safe_float(price_change) >= take_profit:
                     exit_signal = True
-                    logger.info(f"Take profit triggered: {price_change*100:.2f}%")
-                if price_change <= -stop_loss:
+                    logger.info(f"Take profit triggered: {safe_float(price_change*100):.2f}%")
+                if safe_float(price_change) <= -stop_loss:
                     exit_signal = True
-                    logger.info(f"Stop loss triggered: {price_change*100:.2f}%")
+                    logger.info(f"Stop loss triggered: {safe_float(price_change*100):.2f}%")
                     
                 if exit_signal:
                     # Close short position
@@ -390,8 +434,8 @@ def run_backtest(ticker, strategy_name, start_date, end_date, timeframe='1d'):
                                      position_size, profit_loss, position_type)
                     result.add_signal(current_date, current_price, 'buy')
                     
-                    logger.info(f"Closed SHORT position at {current_date}: {ticker} @ ${current_price:.2f}")
-                    logger.info(f"P/L: ${profit_loss:.2f} ({price_change*100:.2f}%)")
+                    logger.info(f"Closed SHORT position at {current_date}: {ticker} @ ${safe_float(current_price):.2f}")
+                    logger.info(f"P/L: ${safe_float(profit_loss):.2f} ({safe_float(price_change*100):.2f}%)")
                     
                     # Reset position
                     in_position = False
@@ -414,8 +458,8 @@ def run_backtest(ticker, strategy_name, start_date, end_date, timeframe='1d'):
         signal_type = 'sell' if position_type == 'long' else 'buy'
         result.add_signal(final_date, final_price, signal_type)
         
-        logger.info(f"Closed position at end of test period: ${final_price:.2f}")
-        logger.info(f"P/L: ${profit_loss:.2f}")
+        logger.info(f"Closed position at end of test period: ${safe_float(final_price):.2f}")
+        logger.info(f"P/L: ${safe_float(profit_loss):.2f}")
     
     # Calculate performance metrics
     result.calculate_metrics()

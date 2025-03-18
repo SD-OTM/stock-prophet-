@@ -6,8 +6,15 @@ Defines different trading strategies with customizable parameters
 import logging
 import numpy as np
 import pandas as pd
+from collections import defaultdict
 
 logger = logging.getLogger(__name__)
+
+def safe_float(value):
+    """Safely convert a value to float, handling pandas Series objects"""
+    if hasattr(value, 'item'):
+        return float(value.item())
+    return float(value)
 
 class Strategy:
     """Base class for all trading strategies"""
@@ -69,8 +76,8 @@ class RSIStrategy(Strategy):
             forecasts = data.attrs['forecast_values']
             if forecasts:
                 # Check if the forecasted prices show an uptrend (last forecast > current price)
-                current_price = latest['Close']
-                last_forecast = forecasts[-1]
+                current_price = safe_float(latest['Close'])
+                last_forecast = safe_float(forecasts[-1])
                 price_trend_up = last_forecast > current_price
                 
                 if price_trend_up:
@@ -80,7 +87,8 @@ class RSIStrategy(Strategy):
         
         # Check if the user has an open position for this ticker
         if user_id in user_data and ticker in user_data[user_id]:
-            buying_price = user_data[user_id][ticker]
+            buying_price = safe_float(user_data[user_id][ticker])
+            close_price = safe_float(latest['Close'])
             
             # Sell Signal (Take Profit or Stop Loss)
             # Only apply the full parameters if price trend is up based on prediction
@@ -92,29 +100,30 @@ class RSIStrategy(Strategy):
                 take_profit_price = buying_price * 1.01  # 1% take profit
                 stop_loss_price = buying_price * 0.95   # 5% stop loss
             
-            if (latest['Close'] >= take_profit_price):
-                profit_pct = ((latest['Close'] / buying_price) - 1) * 100
-                signals.append(f"📉 Sell {ticker} at {latest['Close']:.2f} (Take profit triggered at {profit_pct:.2f}%).")
+            if (close_price >= take_profit_price):
+                profit_pct = ((close_price / buying_price) - 1) * 100
+                signals.append(f"📉 Sell {ticker} at {close_price:.2f} (Take profit triggered at {profit_pct:.2f}%).")
                 del user_data[user_id][ticker]  # Close the position
-            elif (latest['Close'] <= stop_loss_price):
-                loss_pct = (1 - (latest['Close'] / buying_price)) * 100
-                signals.append(f"📉 Sell {ticker} at {latest['Close']:.2f} (Stop loss triggered at {loss_pct:.2f}%).")
+            elif (close_price <= stop_loss_price):
+                loss_pct = (1 - (close_price / buying_price)) * 100
+                signals.append(f"📉 Sell {ticker} at {close_price:.2f} (Stop loss triggered at {loss_pct:.2f}%).")
                 del user_data[user_id][ticker]  # Close the position
             
             # Additional sell signals based on technical indicators
-            elif latest['RSI'] > self.parameters['overbought_threshold']:  # Overbought
-                signals.append(f"📉 Consider selling {ticker} at {latest['Close']:.2f} (RSI {latest['RSI']:.2f} indicates overbought conditions).")
+            elif safe_float(latest['RSI']) > self.parameters['overbought_threshold']:  # Overbought
+                signals.append(f"📉 Consider selling {ticker} at {close_price:.2f} (RSI {safe_float(latest['RSI']):.2f} indicates overbought conditions).")
         
         else:
             # Original buy signal, but only generate if price is forecasted to rise
-            rsi_oversold = latest['RSI'] < self.parameters['oversold_threshold']
+            close_price = safe_float(latest['Close'])
+            rsi_oversold = safe_float(latest['RSI']) < self.parameters['oversold_threshold']
             
             if rsi_oversold and (not self.parameters['use_prediction'] or price_trend_up):
-                signals.append(f"🚀 Buy {ticker} at {latest['Close']:.2f} (RSI {latest['RSI']:.2f} indicates oversold conditions).")
+                signals.append(f"🚀 Buy {ticker} at {close_price:.2f} (RSI {safe_float(latest['RSI']):.2f} indicates oversold conditions).")
                 # Store the buying price
                 if user_id not in user_data:
                     user_data[user_id] = {}
-                user_data[user_id][ticker] = latest['Close']
+                user_data[user_id][ticker] = close_price
             elif rsi_oversold and self.parameters['use_prediction'] and not price_trend_up:
                 signals.append(f"⚠️ RSI indicates oversold conditions for {ticker}, but price is forecasted to decrease. Consider waiting.")
         
@@ -156,8 +165,8 @@ class BollingerBandsStrategy(Strategy):
             forecasts = data.attrs['forecast_values']
             if forecasts:
                 # Check if the forecasted prices show an uptrend (last forecast > current price)
-                current_price = latest['Close']
-                last_forecast = forecasts[-1]
+                current_price = safe_float(latest['Close'])
+                last_forecast = safe_float(forecasts[-1])
                 price_trend_up = last_forecast > current_price
                 
                 if price_trend_up:
@@ -171,7 +180,8 @@ class BollingerBandsStrategy(Strategy):
         
         # Check if the user has an open position for this ticker
         if user_id in user_data and ticker in user_data[user_id]:
-            buying_price = user_data[user_id][ticker]
+            buying_price = safe_float(user_data[user_id][ticker])
+            close_price = safe_float(latest['Close'])
             
             # Sell Signal (Take Profit or Stop Loss)
             # Only apply the full parameters if price trend is up based on prediction
@@ -183,34 +193,36 @@ class BollingerBandsStrategy(Strategy):
                 take_profit_price = buying_price * 1.01  # 1% take profit
                 stop_loss_price = buying_price * 0.95   # 5% stop loss
             
-            if (latest['Close'] >= take_profit_price):
-                profit_pct = ((latest['Close'] / buying_price) - 1) * 100
-                signals.append(f"📉 Sell {ticker} at {latest['Close']:.2f} (Take profit triggered at {profit_pct:.2f}%).")
+            if (close_price >= take_profit_price):
+                profit_pct = ((close_price / buying_price) - 1) * 100
+                signals.append(f"📉 Sell {ticker} at {close_price:.2f} (Take profit triggered at {profit_pct:.2f}%).")
                 del user_data[user_id][ticker]  # Close the position
-            elif (latest['Close'] <= stop_loss_price):
-                loss_pct = (1 - (latest['Close'] / buying_price)) * 100
-                signals.append(f"📉 Sell {ticker} at {latest['Close']:.2f} (Stop loss triggered at {loss_pct:.2f}%).")
+            elif (close_price <= stop_loss_price):
+                loss_pct = (1 - (close_price / buying_price)) * 100
+                signals.append(f"📉 Sell {ticker} at {close_price:.2f} (Stop loss triggered at {loss_pct:.2f}%).")
                 del user_data[user_id][ticker]  # Close the position
             
             # Additional sell signals - close when price hits upper band
-            elif latest['Close'] >= latest['BB_upper']:
-                signals.append(f"📉 Consider selling {ticker} at {latest['Close']:.2f} (Price hit upper Bollinger Band).")
+            elif safe_float(latest['Close']) >= safe_float(latest['BB_upper']):
+                signals.append(f"📉 Consider selling {ticker} at {close_price:.2f} (Price hit upper Bollinger Band).")
         
         else:
             # Buy signal when price is near or below lower band
-            price_near_lower_band = latest['Close'] <= latest['BB_lower'] * 1.01
+            close_price = safe_float(latest['Close'])
+            bb_lower = safe_float(latest['BB_lower'])
+            price_near_lower_band = close_price <= bb_lower * 1.01
             
             # Check if bands are wide enough to indicate volatility
-            band_gap = (latest['BB_upper'] - latest['BB_lower']) / latest['BB_middle']
+            band_gap = (safe_float(latest['BB_upper']) - safe_float(latest['BB_lower'])) / safe_float(latest['BB_middle'])
             sufficient_volatility = band_gap > self.parameters['band_gap_percent']
             
             # Only generate buy signal if not using prediction or price trend is up
             if price_near_lower_band and sufficient_volatility and (not self.parameters['use_prediction'] or price_trend_up):
-                signals.append(f"🚀 Buy {ticker} at {latest['Close']:.2f} (Price at lower Bollinger Band with sufficient volatility).")
+                signals.append(f"🚀 Buy {ticker} at {close_price:.2f} (Price at lower Bollinger Band with sufficient volatility).")
                 # Store the buying price
                 if user_id not in user_data:
                     user_data[user_id] = {}
-                user_data[user_id][ticker] = latest['Close']
+                user_data[user_id][ticker] = close_price
             elif price_near_lower_band and sufficient_volatility and self.parameters['use_prediction'] and not price_trend_up:
                 signals.append(f"⚠️ Price near lower Bollinger Band for {ticker}, but price is forecasted to decrease. Consider waiting.")
         
@@ -252,8 +264,8 @@ class MACDStrategy(Strategy):
             forecasts = data.attrs['forecast_values']
             if forecasts:
                 # Check if the forecasted prices show an uptrend (last forecast > current price)
-                current_price = latest['Close']
-                last_forecast = forecasts[-1]
+                current_price = safe_float(latest['Close'])
+                last_forecast = safe_float(forecasts[-1])
                 price_trend_up = last_forecast > current_price
                 
                 if price_trend_up:
@@ -267,7 +279,8 @@ class MACDStrategy(Strategy):
         
         # Check if the user has an open position for this ticker
         if user_id in user_data and ticker in user_data[user_id]:
-            buying_price = user_data[user_id][ticker]
+            buying_price = safe_float(user_data[user_id][ticker])
+            close_price = safe_float(latest['Close'])
             
             # Sell Signal (Take Profit or Stop Loss)
             # Only apply the full parameters if price trend is up based on prediction
@@ -279,30 +292,31 @@ class MACDStrategy(Strategy):
                 take_profit_price = buying_price * 1.01  # 1% take profit
                 stop_loss_price = buying_price * 0.95   # 5% stop loss
             
-            if (latest['Close'] >= take_profit_price):
-                profit_pct = ((latest['Close'] / buying_price) - 1) * 100
-                signals.append(f"📉 Sell {ticker} at {latest['Close']:.2f} (Take profit triggered at {profit_pct:.2f}%).")
+            if (close_price >= take_profit_price):
+                profit_pct = ((close_price / buying_price) - 1) * 100
+                signals.append(f"📉 Sell {ticker} at {close_price:.2f} (Take profit triggered at {profit_pct:.2f}%).")
                 del user_data[user_id][ticker]  # Close the position
-            elif (latest['Close'] <= stop_loss_price):
-                loss_pct = (1 - (latest['Close'] / buying_price)) * 100
-                signals.append(f"📉 Sell {ticker} at {latest['Close']:.2f} (Stop loss triggered at {loss_pct:.2f}%).")
+            elif (close_price <= stop_loss_price):
+                loss_pct = (1 - (close_price / buying_price)) * 100
+                signals.append(f"📉 Sell {ticker} at {close_price:.2f} (Stop loss triggered at {loss_pct:.2f}%).")
                 del user_data[user_id][ticker]  # Close the position
             
             # Additional sell signals based on MACD crossover (bearish)
-            elif (latest['MACD'] < latest['MACD_Signal']) and abs(latest['MACD'] - latest['MACD_Signal']) > self.parameters['signal_threshold']:
-                signals.append(f"📉 Consider selling {ticker} at {latest['Close']:.2f} (MACD bearish crossover).")
+            elif (safe_float(latest['MACD']) < safe_float(latest['MACD_Signal'])) and abs(safe_float(latest['MACD']) - safe_float(latest['MACD_Signal'])) > self.parameters['signal_threshold']:
+                signals.append(f"📉 Consider selling {ticker} at {close_price:.2f} (MACD bearish crossover).")
         
         else:
             # Buy signal on MACD crossover (bullish)
-            macd_bullish = (latest['MACD'] > latest['MACD_Signal']) and abs(latest['MACD'] - latest['MACD_Signal']) > self.parameters['signal_threshold']
+            close_price = safe_float(latest['Close'])
+            macd_bullish = (safe_float(latest['MACD']) > safe_float(latest['MACD_Signal'])) and abs(safe_float(latest['MACD']) - safe_float(latest['MACD_Signal'])) > self.parameters['signal_threshold']
             
             # Only generate buy signal if not using prediction or price trend is up
             if macd_bullish and (not self.parameters['use_prediction'] or price_trend_up):
-                signals.append(f"🚀 Buy {ticker} at {latest['Close']:.2f} (MACD bullish crossover).")
+                signals.append(f"🚀 Buy {ticker} at {close_price:.2f} (MACD bullish crossover).")
                 # Store the buying price
                 if user_id not in user_data:
                     user_data[user_id] = {}
-                user_data[user_id][ticker] = latest['Close']
+                user_data[user_id][ticker] = close_price
             elif macd_bullish and self.parameters['use_prediction'] and not price_trend_up:
                 signals.append(f"⚠️ MACD shows bullish crossover for {ticker}, but price is forecasted to decrease. Consider waiting.")
         
@@ -313,12 +327,13 @@ class CombinedStrategy(Strategy):
     """Combined strategy using multiple indicators"""
     def __init__(self, parameters=None):
         default_params = {
-            'take_profit': 3.0,  # Percentage - Default 3%
-            'stop_loss': 4.0,    # Percentage - Default 4%
-            'rsi_oversold': 30,
-            'rsi_overbought': 70,
-            'min_indicators': 2,  # Minimum number of indicators confirming for a signal
-            'use_prediction': True  # Consider prediction for TP/SL
+            'take_profit': 1.5,  # Take profit target of 1.5% as requested
+            'stop_loss': 2.0,    # Smaller stop loss for extremely quick exit
+            'rsi_oversold': 49,  # Ultra high RSI oversold threshold to trigger more buys
+            'rsi_overbought': 51, # Ultra low RSI overbought threshold to trigger more sells
+            'min_indicators': 1,  # Only one indicator needed to confirm
+            'use_prediction': False,  # Disabled prediction-based TP/SL to be more aggressive
+            'price_percent_trigger': 0.3  # Trigger trades on tiny price movements (0.3%)
         }
         
         # Override defaults with provided parameters
@@ -411,26 +426,43 @@ class CombinedStrategy(Strategy):
             # Count bullish indicators
             bullish_indicators = 0
             
-            # RSI Oversold
+            # RSI Oversold - now with higher threshold for easier triggering
             if has_rsi and latest['RSI'] is not None and latest['RSI'].item() < self.parameters['rsi_oversold']:
                 bullish_indicators += 1
+            
+            # Force a bullish indicator if RSI is really low (extreme oversold)
+            if has_rsi and latest['RSI'] is not None and latest['RSI'].item() < 30:
+                bullish_indicators += 1  # Add an extra count for extreme oversold
             
             # MACD Bullish Crossover
             if has_macd and latest['MACD'] is not None and latest['MACD_Signal'] is not None and latest['MACD'].item() > latest['MACD_Signal'].item():
                 bullish_indicators += 1
             
             # Price at/below lower Bollinger Band
-            if has_bb and latest['Close'] is not None and latest['BB_lower'] is not None and latest['Close'].item() <= latest['BB_lower'].item():
+            if has_bb and latest['Close'] is not None and latest['BB_lower'] is not None and latest['Close'].item() <= latest['BB_lower'].item() * 1.01:  # Allow 1% above lower band
                 bullish_indicators += 1
             
             # Short-term EMA crosses above long-term
-            if has_ema and latest['EMA_9'] is not None and latest['EMA_21'] is not None and latest['EMA_9'].item() > latest['EMA_21'].item():
+            if has_ema and latest['EMA_9'] is not None and latest['EMA_21'] is not None and latest['EMA_9'].item() > latest['EMA_21'].item() * 0.99:  # Allow 1% tolerance
                 bullish_indicators += 1
+                
+            # Check for recent price drop as a buy signal (mean reversion)
+            if len(data) > 2:
+                prev_close = data['Close'].iloc[-2]
+                current_close = latest['Close'].item() if hasattr(latest['Close'], 'item') else latest['Close']
+                prev_close = prev_close.item() if hasattr(prev_close, 'item') else prev_close
+                if float(current_close) < float(prev_close):
+                    # Price dropped from previous bar
+                    percent_drop = (float(prev_close) - float(current_close)) / float(prev_close) * 100
+                    if percent_drop > self.parameters.get('price_percent_trigger', 0.5):
+                        # Sharp price drop can be a buy opportunity
+                        bullish_indicators += 1
             
             # If enough bullish indicators, suggest buying
             # Only generate buy signal if not using prediction or price trend is up
             if bullish_indicators >= self.parameters['min_indicators'] and (not self.parameters['use_prediction'] or price_trend_up):
-                signals.append(f"🚀 Buy {ticker} at {latest['Close']:.2f} ({bullish_indicators} bullish indicators detected).")
+                current_price = float(latest['Close'].item() if hasattr(latest['Close'], 'item') else latest['Close'])
+                signals.append(f"🚀 Buy {ticker} at {current_price:.2f} ({bullish_indicators} bullish indicators detected).")
                 # Store the buying price
                 if user_id not in user_data:
                     user_data[user_id] = {}
@@ -614,7 +646,8 @@ class GoldStrategy(Strategy):
             if bullish_indicators >= active_params['min_indicators'] and (not active_params['use_prediction'] or price_trend_up):
                 # Add commodity/ETF specific message
                 asset_type_msg = "gold commodity" if is_commodity else "gold ETF"
-                signals.append(f"🚀 Buy {ticker} at {latest['Close']:.2f} ({bullish_indicators} bullish indicators detected for {asset_type_msg}).")
+                current_price = float(latest['Close'].item() if hasattr(latest['Close'], 'item') else latest['Close'])
+                signals.append(f"🚀 Buy {ticker} at {current_price:.2f} ({bullish_indicators} bullish indicators detected for {asset_type_msg}).")
                 
                 # Store the buying price
                 if user_id not in user_data:
