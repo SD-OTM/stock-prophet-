@@ -230,12 +230,8 @@ class DailyPickScanner:
                                 # Get the latest timestamp safely
                                 latest_timestamp = intraday_data.index[-1]
                                 
-                                # Format the time portion properly
-                                if isinstance(latest_timestamp, pd.Timestamp):
-                                    signal_time = latest_timestamp.strftime('%H:%M')
-                                else:
-                                    # Handle other index types by converting to Timestamp first
-                                    signal_time = pd.Timestamp(latest_timestamp).strftime('%H:%M')
+                                # Just use simple string formatting for time
+                                signal_time = str(latest_timestamp).split(" ")[-1].split(".")[0]
                                     
                                 intraday_signals.append({
                                     'timeframe': timeframe,
@@ -328,49 +324,104 @@ class DailyPickScanner:
                 logger.error(f"Error processing {ticker}: {e}")
     
     def _get_stock_data(self, ticker, period="5d", interval="1d"):
-        """Get stock data using yfinance with improved MultiIndex handling"""
+        """Get stock data using yfinance with simplified MultiIndex handling"""
         try:
             data = yf.download(ticker, period=period, interval=interval, progress=False)
             if data.empty or len(data) == 0:
                 logger.warning(f"No data retrieved for {ticker}")
                 return None
-                
+            
             # Handle MultiIndex if present (yfinance API change)
             if isinstance(data.index, pd.MultiIndex):
                 logger.info(f"Converting MultiIndex to DatetimeIndex for {ticker} (interval: {interval})")
                 
-                # For intraday data, combine date and time for proper datetime index
+                # For intraday data, we need special handling to combine date and time
                 if interval in ["1h", "30m", "15m", "5m", "1m"]:
-                    if data.index.nlevels >= 2:
-                        # Create proper datetime objects from the MultiIndex levels
+                    # Method 1: Try to combine the levels directly
+                    try:
+                        # Create a new index by combining the two levels of the MultiIndex
+                        # This extracts the date and time components and combines them
+                        combined_index = pd.to_datetime([f"{date} {time}" for date, time in data.index])
+                        # Set the new combined index
+                        data.index = combined_index
+                    except Exception as e:
+                        logger.warning(f"Error combining MultiIndex directly for {ticker}: {e}")
+                        
                         try:
-                            datetime_index = pd.to_datetime(
-                                data.index.get_level_values(0).strftime('%Y-%m-%d') + ' ' + 
-                                data.index.get_level_values(1).strftime('%H:%M:%S')
-                            )
-                        except Exception as e:
-                            logger.warning(f"Error creating datetime index: {e}, falling back to first level only")
-                            datetime_index = data.index.get_level_values(0)
-                    else:
-                        # If it's a single level index for some reason
-                        datetime_index = data.index.get_level_values(0)
+                            # Method 2: Reset index and create a new datetime column
+                            df_reset = data.reset_index()
+                            
+                            # Check the column names after reset_index
+                            logger.debug(f"Columns after reset_index: {df_reset.columns.tolist()}")
+                            
+                            # Flexible column handling for different yfinance versions
+                            date_col = None
+                            time_col = None
+                            
+                            # Find date and time columns
+                            for col in df_reset.columns:
+                                if 'date' in str(col).lower():
+                                    date_col = col
+                                elif 'time' in str(col).lower() or 'datetime' in str(col).lower():
+                                    time_col = col
+                            
+                            # If we found both columns, combine them
+                            if date_col and time_col:
+                                df_reset['combined_datetime'] = pd.to_datetime(
+                                    df_reset[date_col].astype(str) + ' ' + 
+                                    df_reset[time_col].astype(str)
+                                )
+                                data = df_reset.set_index('combined_datetime')
+                            else:
+                                # Try common column names
+                                if 'Date' in df_reset.columns and 'Datetime' in df_reset.columns:
+                                    df_reset['combined_datetime'] = pd.to_datetime(
+                                        df_reset['Date'].astype(str) + ' ' + 
+                                        df_reset['Datetime'].astype(str)
+                                    )
+                                    data = df_reset.set_index('combined_datetime')
+                                    
+                                    # Drop redundant date/time columns
+                                    if 'Date' in data.columns:
+                                        data = data.drop('Date', axis=1)
+                                    if 'Datetime' in data.columns:
+                                        data = data.drop('Datetime', axis=1)
+                                elif 'Datetime' in df_reset.columns:
+                                    # If only datetime is present, use it
+                                    data = df_reset.set_index('Datetime')
+                                else:
+                                    # Last resort: use the first level as index
+                                    logger.warning(f"Using fallback method for {ticker}")
+                                    data = df_reset.set_index(df_reset.columns[0])
+                        except Exception as e2:
+                            logger.warning(f"Error with Method 2 for {ticker}: {e2}, using raw data")
                 else:
-                    # For daily data, just use the first level
-                    datetime_index = data.index.get_level_values(0)
-                
-                # Create a new DataFrame with the DatetimeIndex
-                new_data = pd.DataFrame(index=datetime_index)
-                
-                # Copy all columns individually
-                for col in data.columns:
-                    new_data[col] = data[col].values
-                
-                data = new_data
+                    # For daily data, typically the first level is the date
+                    try:
+                        # Extract first level of MultiIndex and use as index
+                        date_index = data.index.get_level_values(0)
+                        data.index = pd.to_datetime(date_index)
+                    except Exception as e:
+                        logger.warning(f"Error extracting date level from MultiIndex for {ticker}: {e}")
+                        
+                        # Fallback method: reset and set using Date column
+                        try:
+                            df_reset = data.reset_index()
+                            if 'Date' in df_reset.columns:
+                                data = df_reset.set_index('Date')
+                            else:
+                                # Use first column as index
+                                data = df_reset.set_index(df_reset.columns[0])
+                        except Exception as e2:
+                            logger.warning(f"Error with fallback method for {ticker}: {e2}")
             
-            # Additionally ensure all datetime indexes are properly converted to DatetimeIndex
+            # Final safeguard to ensure it's a DatetimeIndex
             if not isinstance(data.index, pd.DatetimeIndex):
-                data.index = pd.to_datetime(data.index)
-                
+                try:
+                    data.index = pd.to_datetime(data.index)
+                except Exception as e:
+                    logger.warning(f"Could not convert index to DatetimeIndex for {ticker}: {e}")
+            
             return data
         except Exception as e:
             logger.error(f"Error fetching data for {ticker}: {e}")
@@ -443,12 +494,8 @@ class DailyPickScanner:
                         entry_price = current_price
                         entry_date = current_date
                         in_position = True
-                        # Handle MultiIndex or standard DatetimeIndex for entry_date
-                        if isinstance(entry_date, pd.Timestamp):
-                            entry_date_str = entry_date.strftime('%Y-%m-%d')
-                        else:
-                            # Handle MultiIndex case
-                            entry_date_str = pd.Timestamp(entry_date).strftime('%Y-%m-%d')
+                        # Simply use the date string representation
+                        entry_date_str = str(entry_date).split(" ")[0]
                         logger.info(f"BUY signal: {ticker} @ ${entry_price:.2f} on {entry_date_str}")
                     
                     elif in_position:
@@ -480,6 +527,16 @@ class DailyPickScanner:
                             profit_pct = price_change * 100
                             
                             # Record trade
+                            # Ensure dates are properly converted to timestamps for calculations
+                            try:
+                                # Handle potential MultiIndex dates by converting to Timestamp for calculations
+                                entry_timestamp = pd.Timestamp(entry_date) if not isinstance(entry_date, pd.Timestamp) else entry_date
+                                exit_timestamp = pd.Timestamp(exit_date) if not isinstance(exit_date, pd.Timestamp) else exit_date
+                                days_held = (exit_timestamp - entry_timestamp).days
+                            except Exception as e:
+                                logger.warning(f"Error calculating days_held for {ticker}: {e}, defaulting to 0")
+                                days_held = 0
+                                
                             trade_info = {
                                 'ticker': ticker,
                                 'entry_date': entry_date,
@@ -488,7 +545,7 @@ class DailyPickScanner:
                                 'exit_price': exit_price,
                                 'profit_pct': profit_pct,
                                 'reason': exit_reason,
-                                'days_held': (exit_date - entry_date).days
+                                'days_held': days_held
                             }
                             
                             self.trade_history.append(trade_info)
@@ -503,19 +560,19 @@ class DailyPickScanner:
                                 if profit_pct >= 2.0:
                                     self.profitable_trades.append(trade_info)
                             
-                            # Handle MultiIndex or standard DatetimeIndex for exit_date
-                            if isinstance(exit_date, pd.Timestamp):
-                                exit_date_str = exit_date.strftime('%Y-%m-%d')
-                            else:
-                                # Handle MultiIndex case
-                                exit_date_str = pd.Timestamp(exit_date).strftime('%Y-%m-%d')
+                            # Simply use the date string representation
+                            exit_date_str = str(exit_date).split(" ")[0]
                             logger.info(f"SELL signal: {ticker} @ ${exit_price:.2f} on {exit_date_str} - {exit_reason}")
                             
                             # Reset position
                             in_position = False
             
             except Exception as e:
-                logger.error(f"Error simulating trades for {ticker}: {e}")
+                # Better error handling for common MultiIndex issues
+                if "Can only use .str accessor with Index, not MultiIndex" in str(e):
+                    logger.warning(f"MultiIndex error for {ticker}. Skipping this ticker.")
+                else:
+                    logger.error(f"Error simulating trades for {ticker}: {e}")
         
         # Calculate additional metrics
         if self.profitable_trades:
@@ -633,21 +690,30 @@ class DailyPickScanner:
             
             # Add details of the most recent profitable trades (up to 5)
             result_str += "Recent Profitable Trades (2%+):\n"
-            recent_profitable = sorted(self.profitable_trades, key=lambda x: x['exit_date'], reverse=True)[:5]
+            # Safe sorting with MultiIndex for exit_date
+            try:
+                # First convert all dates to comparable format
+                for trade in self.profitable_trades:
+                    if not isinstance(trade['exit_date'], pd.Timestamp):
+                        try:
+                            trade['sort_date'] = pd.Timestamp(trade['exit_date'])
+                        except:
+                            # If conversion fails, use a default old date
+                            trade['sort_date'] = pd.Timestamp('2000-01-01')
+                    else:
+                        trade['sort_date'] = trade['exit_date']
+                
+                # Now sort using the sort_date field
+                recent_profitable = sorted(self.profitable_trades, key=lambda x: x['sort_date'], reverse=True)[:5]
+            except Exception as e:
+                logger.warning(f"Error sorting profitable trades: {e}, using unsorted list")
+                # Fallback to unsorted, just use the first 5
+                recent_profitable = self.profitable_trades[:5]
             
             for i, trade in enumerate(recent_profitable, 1):
-                # Handle MultiIndex or standard DatetimeIndex for entry_date and exit_date
-                if isinstance(trade['entry_date'], pd.Timestamp):
-                    entry_date_str = trade['entry_date'].strftime('%Y-%m-%d')
-                else:
-                    # Handle MultiIndex case
-                    entry_date_str = pd.Timestamp(trade['entry_date']).strftime('%Y-%m-%d')
-                    
-                if isinstance(trade['exit_date'], pd.Timestamp):
-                    exit_date_str = trade['exit_date'].strftime('%Y-%m-%d')
-                else:
-                    # Handle MultiIndex case
-                    exit_date_str = pd.Timestamp(trade['exit_date']).strftime('%Y-%m-%d')
+                # Simply use string representation for entry and exit dates
+                entry_date_str = str(trade['entry_date']).split(' ')[0]
+                exit_date_str = str(trade['exit_date']).split(' ')[0]
                     
                 days = trade['days_held']
                 result_str += f"{i}. {trade['ticker']}: ${trade['entry_price']:.2f} → ${trade['exit_price']:.2f} "

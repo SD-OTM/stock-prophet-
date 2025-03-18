@@ -51,9 +51,13 @@ class BacktestResult:
         self.max_drawdown = 0.0
         self.profit_factor = 0.0
         self.win_rate = 0.0
-        self.buy_and_hold_return = 0.0
+        self.buy_and_hold_return = 0.0  # Buy and hold return for comparison
         self.strategy_return = 0.0
-        self.total_return = 0.0  # Add total_return attribute to fix the issue
+        self.total_return = 0.0  # Total percentage return
+        self.buy_hold_return = 0.0  # Alias for compatibility with other modules
+        self.outperformance = 0.0  # Outperformance compared to buy and hold
+        self.total_trades = 0  # Total number of trades executed
+        self.data = None  # Store data for plotting and analysis
         self.signals = []
         
     def add_trade(self, entry_date, entry_price, exit_date, exit_price, shares, profit_loss, trade_type):
@@ -78,6 +82,9 @@ class BacktestResult:
         
     def calculate_metrics(self):
         """Calculate performance metrics"""
+        # Set total trades attribute
+        self.total_trades = len(self.trades)
+        
         if not self.trades:
             logger.warning("No trades executed during backtesting period")
             self.win_rate = 0.0
@@ -85,6 +92,8 @@ class BacktestResult:
             self.max_drawdown = 0.0
             self.strategy_return = 0.0
             self.total_return = 0.0  # Set the total_return for compatibility
+            self.buy_hold_return = self.buy_and_hold_return  # Set the alias for compatibility
+            self.outperformance = self.strategy_return - self.buy_and_hold_return  # Calculate outperformance
             return
             
         # Calculate profit metrics
@@ -101,6 +110,8 @@ class BacktestResult:
         self.final_balance = self.initial_balance + sum(safe_float(t['profit_loss']) for t in self.trades)
         self.strategy_return = (self.final_balance / self.initial_balance - 1) * 100.0
         self.total_return = self.strategy_return  # Set total_return same as strategy_return for compatibility
+        self.buy_hold_return = self.buy_and_hold_return  # Set the alias for compatibility
+        self.outperformance = self.strategy_return - self.buy_and_hold_return  # Calculate outperformance
         
         # Calculate max drawdown
         balance_curve = [self.initial_balance]
